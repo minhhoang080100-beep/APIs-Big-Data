@@ -41,6 +41,7 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+test_*.py
 
 # OS files
 Thumbs.db
