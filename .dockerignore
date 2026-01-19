@@ -15,3 +15,6 @@ test_*.py
 .pytest_cache/
 .coverage
 htmlcov/
+*.md
+build.sh
+render-build.sh
