@@ -1176,25 +1176,28 @@ async def get_ships(
     logger.info(f"Ship list request by {current_user.username}")
     
     try:
-        # Query to get ships from dbo.Vessel
+        # Query to get ships from dbo.Vessel with VesselType JOIN
         # Pattern 1: rowDeleted = 0 for active records
         query = """
             SELECT
-                vesselId,
-                vesselCode,
-                vesselName,
-                numberIMO,
-                vesselTypeId,
-                countryId,
-                vesselGT,
-                vesselBEAM,
-                vesselLOA,
-                vesselDWT,
-                ownerId,
-                createTime,
-                updateTime
-            FROM dbo.Vessel
-            WHERE rowDeleted = 0
+                v.vesselId,
+                v.vesselCode,
+                v.vesselName,
+                v.numberIMO,
+                v.vesselTypeId,
+                vt.vesselTypeCode,
+                vt.vesselTypeName,
+                v.countryId,
+                v.vesselGT,
+                v.vesselBEAM,
+                v.vesselLOA,
+                v.vesselDWT,
+                v.ownerId,
+                v.createTime,
+                v.updateTime
+            FROM dbo.Vessel v
+            LEFT JOIN dbo.VesselType vt ON v.vesselTypeId = vt.vesselTypeId
+            WHERE v.rowDeleted = 0
         """
         
         params = []
@@ -1222,7 +1225,7 @@ async def get_ships(
                 shipLOA=str(row.get('vesselLOA', '')) if row.get('vesselLOA') else None,
                 shipBeam=str(row.get('vesselBEAM', '')) if row.get('vesselBEAM') else None,
                 shipGRT=str(row.get('vesselGT', '')) if row.get('vesselGT') else None,
-                shipType=str(row.get('vesselTypeId', '')) if row.get('vesselTypeId') else None,
+                shipType=row.get('vesselTypeName', '') or None,
                 shipDWT=str(row.get('vesselDWT', '')) if row.get('vesselDWT') else None,
                 shipOwner=str(row.get('ownerId', '')) if row.get('ownerId') else None,
                 createdDate=row.get('createTime').strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z" if row.get('createTime') and hasattr(row.get('createTime'), 'strftime') else str(row.get('createTime')) if row.get('createTime') else None,
@@ -1278,22 +1281,25 @@ async def get_ship_by_imo(
     try:
         query = """
             SELECT
-                vesselId,
-                vesselCode,
-                vesselName,
-                numberIMO,
-                vesselTypeId,
-                countryId,
-                vesselGT,
-                vesselBEAM,
-                vesselLOA,
-                vesselDWT,
-                ownerId,
-                createTime,
-                updateTime
-            FROM dbo.Vessel
-            WHERE rowDeleted = 0
-            AND numberIMO = ?
+                v.vesselId,
+                v.vesselCode,
+                v.vesselName,
+                v.numberIMO,
+                v.vesselTypeId,
+                vt.vesselTypeCode,
+                vt.vesselTypeName,
+                v.countryId,
+                v.vesselGT,
+                v.vesselBEAM,
+                v.vesselLOA,
+                v.vesselDWT,
+                v.ownerId,
+                v.createTime,
+                v.updateTime
+            FROM dbo.Vessel v
+            LEFT JOIN dbo.VesselType vt ON v.vesselTypeId = vt.vesselTypeId
+            WHERE v.rowDeleted = 0
+            AND v.numberIMO = ?
         """
         
         results = db.execute_query(query, (ship_imo,))
@@ -1318,7 +1324,7 @@ async def get_ship_by_imo(
             shipLOA=str(row.get('vesselLOA', '')) if row.get('vesselLOA') else None,
             shipBeam=str(row.get('vesselBEAM', '')) if row.get('vesselBEAM') else None,
             shipGRT=str(row.get('vesselGT', '')) if row.get('vesselGT') else None,
-            shipType=str(row.get('vesselTypeId', '')) if row.get('vesselTypeId') else None,
+            shipType=row.get('vesselTypeName', '') or None,
             shipDWT=str(row.get('vesselDWT', '')) if row.get('vesselDWT') else None,
             shipOwner=str(row.get('ownerId', '')) if row.get('ownerId') else None,
             createdDate=row.get('createTime').strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z" if row.get('createTime') and hasattr(row.get('createTime'), 'strftime') else str(row.get('createTime')) if row.get('createTime') else None,
@@ -1659,6 +1665,7 @@ async def get_container_quay_volumes(
                 t.cargoDirectId,
                 t.weightNetSum,
                 t.quantityTotalSum,
+                t.cargoCode,
                 c.cargoGroupCode,
                 c.cargoGroupId,
                 t.createTime,
@@ -1707,6 +1714,26 @@ async def get_container_quay_volumes(
         # Transform to ContainerQuayVolumeData format
         volumes = []
         for row in results:
+            # Calculate containerTEU based on cargoCode
+            quantity = row.get('quantityTotalSum', 0) or 0
+            cargo_code = (row.get('cargoCode') or '').upper().strip()
+            
+            # TEU calculation formula:
+            # 20ft containers (20E, 20F) = quantity * 1
+            # 40ft containers (40E, 40F) = quantity * 2
+            # 45ft containers (45E, 45F) = quantity * 2.25
+            if cargo_code in ['20E', '20F']:
+                teu_multiplier = 1.0
+            elif cargo_code in ['40E', '40F']:
+                teu_multiplier = 2.0
+            elif cargo_code in ['45E', '45F']:
+                teu_multiplier = 2.25
+            else:
+                # Default to 1 for unknown cargo codes
+                teu_multiplier = 1.0
+            
+            container_teu = int(quantity * teu_multiplier)
+            
             volume_item = ContainerQuayVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
                 companyId=str(row.get('consigneeId', '')) if row.get('consigneeId') else '',
@@ -1714,7 +1741,7 @@ async def get_container_quay_volumes(
                 classId=str(row.get('cargoDirectId', '')) if row.get('cargoDirectId') else '',
                 originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',  # Can be adjusted based on requirements
                 containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
-                containerTEU=int(row.get('quantityTotalSum', 0)) if row.get('quantityTotalSum') else 0,
+                containerTEU=container_teu,
                 handlingMethodId=str(row.get('jobMethodId', '')) if row.get('jobMethodId') else '',
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
                 shipOperatorId=str(row.get('consigneeCode', '')) if row.get('consigneeCode') else '',
