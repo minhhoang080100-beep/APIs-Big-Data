@@ -9,18 +9,6 @@ class LoginRequest(BaseModel):
     """Login request schema"""
     Username: str = Field(..., description="Username")
     Password: str = Field(..., description="Password (can be plain or hashed)")
-    
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "Username": "abc",
-                    "Password": "6504E4EF9274BDE48162B6F2BE0FDF0"
-                }
-            ]
-        }
-    }
-
 
 class LoginResponse(BaseModel):
     """Login response schema"""
@@ -28,28 +16,15 @@ class LoginResponse(BaseModel):
     Code: str = Field(..., description="Response code (1 = success)")
     Message: str = Field(..., description="Response message")
     ExpireIn: str = Field(..., description="Token expiration time (e.g., '8h')")
-    
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "AccessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-                    "Code": "1",
-                    "Message": "Login thành công",
-                    "ExpireIn": "8h"
-                }
-            ]
-        }
-    }
-
 
 class ErrorResponse(BaseModel):
     """Error response schema"""
     Code: str = Field(..., description="Error code")
     Message: str = Field(..., description="Error message")
 
-
+# ============================================================
 # Customer API Schemas
+# ============================================================
 
 class CustomerMetadata(BaseModel):
     """Customer metadata"""
@@ -71,31 +46,6 @@ class CustomerData(BaseModel):
     isAgent: int = Field(0, description="1 = đại lý, 0 = không phải")
     customerStatus: str = Field("", description="Trạng thái khách hàng")
     metadata: CustomerMetadata
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "reportDate": "2025-10-05",
-                    "customerCode": 6001,
-                    "customerNameVN": "Công Ty TNHH ABC",
-                    "customerNameEN": "Company ABC",
-                    "customerTaxCode": "0101234567",
-                    "customerPhoneNum": "0904123456",
-                    "customerAddress": "Cảng Nghệ Tĩnh",
-                    "customerEmail": "contact@abc.com",
-                    "isCarrier": 1,
-                    "isAgent": 0,
-                    "customerStatus": "",
-                    "metadata": {
-                        "isDeleted": 0,
-                        "modifiedDate": "2025-09-15T10:30:00"
-                    }
-                }
-            ]
-        }
-    }
-
 
 class CustomerListResponse(BaseModel):
     """Response for customer list"""
@@ -124,8 +74,9 @@ class CustomerSingleResponse(BaseModel):
     message: str = Field("", description="Thông báo")
     data: Optional[CustomerData] = None
 
-
+# ============================================================
 # Cargo Category API Schemas
+# ============================================================
 
 class CargoData(BaseModel):
     """Cargo category data model"""
@@ -136,23 +87,6 @@ class CargoData(BaseModel):
     cargoName: str = Field("", description="Tên nhóm hàng hóa")
     createdDate: Optional[str] = Field(None, description="Ngày tạo bản ghi")
     modifiedDate: Optional[str] = Field(None, description="Ngày sửa bản ghi")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "reportDate": "2025-10-05",
-                    "cargoId": 1234,
-                    "cargoParentId": 123,
-                    "cargoTypeId": 12345,
-                    "cargoName": "Hàng sắt thép",
-                    "createdDate": "2023-01-01T00:00:00Z",
-                    "modifiedDate": "2023-01-01T00:00:00Z"
-                }
-            ]
-        }
-    }
-
 
 class CargoListResponse(BaseModel):
     """Response for cargo category list"""
@@ -167,8 +101,9 @@ class CargoSingleResponse(BaseModel):
     message: str = Field("", description="Thông báo")
     data: Optional[CargoData] = None
 
-
+# ============================================================
 # Cargo Type API Schemas
+# ============================================================
 
 class CargoTypeData(BaseModel):
     """Cargo type data model"""
@@ -177,21 +112,6 @@ class CargoTypeData(BaseModel):
     cargoTypeName: str = Field("", description="Tên loại hàng (Hàng container, Hàng RORO, Hàng bách hóa, Hàng xá, Hàng khí hóa lỏng (LNG))")
     createdDate: Optional[str] = Field(None, description="Ngày tạo bản ghi")
     modifiedDate: Optional[str] = Field(None, description="Ngày sửa bản ghi")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "reportDate": "2025-10-05",
-                    "cargoTypeId": "CRGTYPE1",
-                    "cargoTypeName": "Hàng container",
-                    "createdDate": "2023-01-01T00:00:00Z",
-                    "modifiedDate": "2023-01-01T00:00:00Z"
-                }
-            ]
-        }
-    }
-
 
 class CargoTypeListResponse(BaseModel):
     """Response for cargo type list"""
@@ -206,8 +126,9 @@ class CargoTypeSingleResponse(BaseModel):
     message: str = Field("", description="Thông báo")
     data: Optional[CargoTypeData] = None
 
-
+# ============================================================
 # Handling Method API Schemas
+# ============================================================
 
 class HandlingMethodData(BaseModel):
     """Handling method data model"""
@@ -216,21 +137,6 @@ class HandlingMethodData(BaseModel):
     handlingMethodName: str = Field("", description="Tên phương án tác nghiệp: Nhập hàng từ tàu lên kho bãi, Xuất hàng từ kho bãi xuống tàu...")
     createdDate: Optional[str] = Field(None, description="Ngày tạo bản ghi")
     modifiedDate: Optional[str] = Field(None, description="Ngày sửa bản ghi")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "reportDate": "2025-10-05",
-                    "handlingMethodId": "NTAU",
-                    "handlingMethodName": "Nhập hàng từ tàu lên kho bãi",
-                    "createdDate": "2023-01-01T00:00:00Z",
-                    "modifiedDate": "2023-01-01T00:00:00Z"
-                }
-            ]
-        }
-    }
-
 
 class HandlingMethodListResponse(BaseModel):
     """Response for handling method list"""
@@ -323,25 +229,6 @@ class BulkGateVolumeData(BaseModel):
     bulkOriginId: str = Field(..., description="Nguồn gốc hàng hóa")
     bulkWeight: float = Field(..., description="Tổng trọng lượng (đơn vị: tấn)")
     customerCode: str = Field(..., description="Mã khách hàng")
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "reportDate": "2025-10-15",
-                    "finishDate": "2025-10-15",
-                    "companyId": "101",
-                    "cargoTypeId": "1234",
-                    "cargoCategoryId": "1234",
-                    "handlingMethodId": "XBAI",
-                    "bulkOriginId": "1234",
-                    "bulkWeight": 5000.0,
-                    "customerCode": "CSTM1234"
-                }
-            ]
-        }
-    }
-
 
 class BulkGateVolumeListResponse(BaseModel):
     """Response for bulk gate volume list endpoint"""
