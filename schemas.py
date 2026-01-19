@@ -287,3 +287,26 @@ class ContainerQuayVolumeListResponse(BaseModel):
     code: str = Field("1", description="Mã trả về (1 = thành công)")
     message: str = Field("", description="Thông báo")
     data: List[ContainerQuayVolumeData] = Field(default_factory=list)
+
+
+# ============================================================
+# Container Gate Volumes (Container qua Cổng Cảng/Kho Bãi) Schemas
+# ============================================================
+
+class ContainerGateVolumeData(BaseModel):
+    """Schema for Container Gate Volume data"""
+    reportDate: str = Field(..., description="Ngày lấy dữ liệu")
+    companyId: str = Field(..., description="Mã đơn vị cảng biển")
+    originId: str = Field(..., description="Nguồn gốc hàng hóa (tàu đến, tàu đi, nhập khẩu, xuất khẩu, multifile...)")
+    containerWeight: float = Field(..., description="Tổng trọng lượng container (Tấn) thông qua cổng")
+    containerTEU: int = Field(..., description="Tổng TEU quy đổi thông qua cổng")
+    handlingMethodId: str = Field(..., description="Phương án tác nghiệp (onmode), container di chuyển các trong cảng")
+    finishDate: str = Field(..., description="Ngày ghi nhận sản lượng")
+    containerOperatorId: str = Field(..., description="Mã của vụ container")
+
+
+class ContainerGateVolumeListResponse(BaseModel):
+    """Response for container gate volume list endpoint"""
+    code: str = Field("1", description="Mã trả về (1 = thành công)")
+    message: str = Field("", description="Thông báo")
+    data: List[ContainerGateVolumeData] = Field(default_factory=list)

@@ -35,7 +35,9 @@ from schemas import (
     BulkQuayVolumeListResponse,
     BulkQuayVolumeData,
     ContainerQuayVolumeListResponse,
-    ContainerQuayVolumeData
+    ContainerQuayVolumeData,
+    ContainerGateVolumeListResponse,
+    ContainerGateVolumeData
 )
 from database import db
 from auth import (
@@ -1658,8 +1660,10 @@ async def get_container_quay_volumes(
                 t.tallyShiftId,
                 t.consigneeId,
                 t.consigneeCode,
+                t.consigneeFullName,
                 t.cargoId,
                 t.jobMethodId,
+                t.jobMethodName,
                 t.vesselId,
                 t.agencyId,
                 t.cargoDirectId,
@@ -1698,7 +1702,7 @@ async def get_container_quay_volumes(
             params.append(shipId)
         
         if handlingMethodId:
-            query += " AND t.jobMethodId = ?"
+            query += " AND t.jobMethodName = ?"
             params.append(handlingMethodId)
         
         # Calculate offset for pagination
@@ -1742,10 +1746,10 @@ async def get_container_quay_volumes(
                 originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',  # Can be adjusted based on requirements
                 containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
                 containerTEU=container_teu,
-                handlingMethodId=str(row.get('jobMethodId', '')) if row.get('jobMethodId') else '',
+                handlingMethodId=row.get('jobMethodName', '') or '',
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
-                shipOperatorId=str(row.get('consigneeCode', '')) if row.get('consigneeCode') else '',
-                containerOperatorId=str(row.get('consigneeId', '')) if row.get('consigneeId') else ''
+                shipOperatorId='',
+                containerOperatorId=row.get('consigneeFullName', '') or ''
             )
             volumes.append(volume_item)
         
@@ -1759,6 +1763,153 @@ async def get_container_quay_volumes(
         
     except Exception as e:
         logger.error(f"Error fetching container quay volumes: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "0",
+                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+            }
+        )
+
+
+# Container Gate Volumes API Endpoint
+
+@app.get(
+    "/api/contGateVolumesCB",
+    response_model=ContainerGateVolumeListResponse,
+    responses={
+        200: {"description": "Lấy dữ liệu thành công"},
+        401: {"description": "Chưa xác thực"},
+        500: {"description": "Lỗi server"}
+    },
+    summary="Lấy toàn bộ các bản ghi sản lượng container qua cổng cảng/kho bãi (với filter)",
+    tags=["Container Gate Volumes"]
+)
+async def get_container_gate_volumes(
+    startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, từ ngày"),
+    endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, đến ngày"),
+    companyId: Optional[str] = Query(None, description="Lọc các bản ghi theo đơn vị công ty"),
+    handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
+    page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
+    limit: Optional[int] = Query(20, description="Số lượng record mỗi trang (max 100)", ge=1, le=100),
+    current_user = Depends(get_current_user)
+):
+    """
+    API cung cấp sản lượng container thông qua cổng cảng và kho bãi
+    
+    **Filters applied:**
+    - JOIN with vwVesselFull to filter vesselTypeCode = 'Container Yard'
+    - weightNetSum > 0
+    - rowDeleted IS NULL (active records only)
+    - Optional: startDate, endDate, companyId, handlingMethodId
+    
+    **Yêu cầu**: Bearer token từ /api/login
+    """
+    logger.info(f"Container gate volumes request by {current_user.username}")
+    
+    try:
+        # Base query for container gate volumes from vwTallyShiftAll
+        # JOIN with vwVesselFull to filter by vesselTypeCode = 'Container Yard'
+        # Pattern 2: rowDeleted IS NULL for active records
+        query = """
+            SELECT
+                t.shiftDate,
+                t.tallyShiftId,
+                t.consigneeId,
+                t.consigneeCode,
+                t.consigneeFullName,
+                t.cargoId,
+                t.jobMethodId,
+                t.jobMethodName,
+                t.vesselId,
+                t.vesselName,
+                t.weightNetSum,
+                t.quantityTotalSum,
+                t.cargoCode,
+                v.vesselTypeCode,
+                t.createTime,
+                t.updateTime
+            FROM dbo.vwTallyShiftAll t
+            LEFT JOIN dbo.vwVesselFull v ON t.vesselName = v.vesselName
+            WHERE t.rowDeleted IS NULL
+            AND t.weightNetSum > 0
+            AND v.vesselTypeCode = 'Container Yard'
+        """
+        
+        params = []
+        
+        # Add optional filters
+        if startDate:
+            query += " AND t.shiftDate >= ?"
+            params.append(startDate)
+        
+        if endDate:
+            query += " AND t.shiftDate <= ?"
+            params.append(endDate)
+        
+        if companyId:
+            query += " AND t.consigneeId = ?"
+            params.append(companyId)
+        
+        if handlingMethodId:
+            query += " AND t.jobMethodName = ?"
+            params.append(handlingMethodId)
+        
+        # Calculate offset for pagination
+        offset = (page - 1) * limit
+        
+        # Add ordering and pagination
+        query += " ORDER BY t.shiftDate DESC, t.tallyShiftId OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
+        params.extend([offset, limit])
+        
+        # Execute query
+        results = db.execute_query(query, tuple(params))
+        
+        # Transform to ContainerGateVolumeData format
+        volumes = []
+        for row in results:
+            # Calculate containerTEU based on cargoCode (same logic as container quay)
+            quantity = row.get('quantityTotalSum', 0) or 0
+            cargo_code = (row.get('cargoCode') or '').upper().strip()
+            
+            # TEU calculation formula:
+            # 20ft containers (20E, 20F) = quantity * 1
+            # 40ft containers (40E, 40F) = quantity * 2
+            # 45ft containers (45E, 45F) = quantity * 2.25
+            if cargo_code in ['20E', '20F']:
+                teu_multiplier = 1.0
+            elif cargo_code in ['40E', '40F']:
+                teu_multiplier = 2.0
+            elif cargo_code in ['45E', '45F']:
+                teu_multiplier = 2.25
+            else:
+                # Default to 1 for unknown cargo codes
+                teu_multiplier = 1.0
+            
+            container_teu = int(quantity * teu_multiplier)
+            
+            volume_item = ContainerGateVolumeData(
+                reportDate=datetime.now().strftime("%Y-%m-%d"),
+                companyId=str(row.get('consigneeId', '')) if row.get('consigneeId') else '',
+                originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
+                containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
+                containerTEU=container_teu,
+                handlingMethodId=row.get('jobMethodName', '') or '',
+                finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
+                containerOperatorId=row.get('consigneeFullName', '') or ''
+            )
+            volumes.append(volume_item)
+        
+        logger.info(f"Returned {len(volumes)} container gate volume records (page {page}, limit {limit})")
+        
+        return ContainerGateVolumeListResponse(
+            code="1",
+            message="Lấy dữ liệu thành công" if volumes else "Không có dữ liệu",
+            data=volumes
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching container gate volumes: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
