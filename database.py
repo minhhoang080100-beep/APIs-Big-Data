@@ -3,8 +3,13 @@ Database connection module for SQL Server
 """
 import pyodbc
 import logging
+import os
 from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -15,11 +20,14 @@ class DatabaseConnection:
     
     def __init__(self):
         """Initialize database connection parameters"""
-        self.server = "Tosdb.nghetinhport.vn\\mssqlserver,37689"
-        self.database = "SmartTOS"
-        self.username = "nghetinhport_readonly"
-        self.password = "ngHeeJTInH~Port37!99"
-        self.driver = "ODBC Driver 17 for SQL Server"
+        self.server = os.getenv("DB_SERVER", "Tosdb.nghetinhport.vn\\mssqlserver,37689")
+        self.database = os.getenv("DB_DATABASE", "SmartTOS")
+        self.username = os.getenv("DB_USERNAME", "nghetinhport_readonly")
+        self.password = os.getenv("DB_PASSWORD", "")
+        self.driver = os.getenv("DB_DRIVER", "ODBC Driver 17 for SQL Server")
+        
+        if not self.password:
+            logger.warning("DB_PASSWORD not set in environment variables")
         
         logger.info(f"Database initialized: {self.database} on {self.server}")
     
