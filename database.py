@@ -7,12 +7,20 @@ import os
 from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
 from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+from pathlib import Path
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+# Load environment variables
+# Try Render's secret files location first, then local .env
+render_env = Path("/etc/secrets/.env")
+if render_env.exists():
+    load_dotenv(dotenv_path=render_env)
+    logger.info(f"Loaded environment from Render secret file: {render_env}")
+else:
+    load_dotenv()
+    logger.info("Loaded environment from local .env file")
 
 
 class DatabaseConnection:
