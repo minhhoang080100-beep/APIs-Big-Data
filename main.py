@@ -840,7 +840,7 @@ async def get_handling_methods(
     logger.info(f"Handling method list request by {current_user.username}")
     
     try:
-        # Query to get distinct handling methods from vwTallyShiftAll
+        # Query to get distinct handling methods from vwJobMethodAll
         # Use jobMethodCode and jobMethodName for handling method information
         query = """
             SELECT DISTINCT
@@ -848,8 +848,8 @@ async def get_handling_methods(
                 jobMethodName,
                 MIN(createTime) as createTime,
                 MAX(updateTime) as updateTime
-            FROM dbo.vwTallyShiftAll
-            WHERE rowDeleted IS NULL
+            FROM dbo.vwJobMethodAll
+            WHERE rowDeleted = 0
             AND jobMethodCode IS NOT NULL
             AND jobMethodName IS NOT NULL
             GROUP BY jobMethodCode, jobMethodName
@@ -931,8 +931,8 @@ async def get_handling_method_by_id(
                 jobMethodName,
                 MIN(createTime) as createTime,
                 MAX(updateTime) as updateTime
-            FROM dbo.vwTallyShiftAll
-            WHERE rowDeleted IS NULL
+            FROM dbo.vwJobMethodAll
+            WHERE rowDeleted = 0
             AND jobMethodCode = ?
             GROUP BY jobMethodCode, jobMethodName
         """
