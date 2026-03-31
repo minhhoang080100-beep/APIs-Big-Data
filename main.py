@@ -1494,7 +1494,6 @@ async def get_bulk_gate_volumes(
 async def get_bulk_quay_volumes(
     startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record bắt đầu từ finishDate"),
     endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record có ngày kết thúc là finishDate"),
-    companyId: Optional[str] = Query(None, description="Lọc các bản ghi theo đơn vị công ty"),
     shipId: Optional[str] = Query(None, description="Lọc các bản ghi theo tàu chở hàng rời"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
@@ -1554,9 +1553,7 @@ async def get_bulk_quay_volumes(
             query += " AND t.shiftDate <= ?"
             params.append(endDate)
         
-        if companyId:
-            query += " AND t.consigneeId = ?"
-            params.append(companyId)
+        # companyId is hardcoded as 'CNT' - removed from query filters
         
         if shipId:
             query += " AND t.vesselId = ?"
@@ -1582,7 +1579,7 @@ async def get_bulk_quay_volumes(
             volume_item = BulkQuayVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
-                companyId=str(row.get('consigneeId', '')) if row.get('consigneeId') else '',
+                companyId="CNT",
                 shipId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 shipAgentId=str(row.get('agencyId', '')) if row.get('agencyId') else '',
                 cargoTypeId=str(row.get('cargoGroupId', '')) if row.get('cargoGroupId') else '',
