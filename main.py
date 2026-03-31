@@ -1370,7 +1370,6 @@ async def get_ship_by_imo(
 async def get_bulk_gate_volumes(
     startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record bắt đầu từ finishDate"),
     endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record có ngày kết thúc là finishDate"),
-    companyId: Optional[str] = Query(None, description="Lọc các bản ghi theo đơn vị công ty"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
     limit: Optional[int] = Query(20, description="Số lượng record mỗi trang (max 100)", ge=1, le=100),
@@ -1423,11 +1422,7 @@ async def get_bulk_gate_volumes(
             query += " AND t.shiftDate <= ?"
             params.append(endDate)
         
-        if companyId:
-            # companyId filter - assuming it maps to a specific field
-            # Adjust if needed based on actual schema
-            query += " AND t.consigneeId = ?"
-            params.append(companyId)
+        # companyId is hardcoded as 'CNT' - removed from query filters
         
         if handlingMethodId:
             query += " AND t.jobMethodId = ?"
@@ -1626,7 +1621,6 @@ async def get_bulk_quay_volumes(
 async def get_container_quay_volumes(
     startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record bắt đầu từ finishDate"),
     endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record có ngày kết thúc là finishDate"),
-    companyId: Optional[str] = Query(None, description="Lọc các bản ghi theo đơn vị công ty"),
     shipId: Optional[str] = Query(None, description="Lọc các bản ghi theo tàu chở hàng"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
@@ -1690,9 +1684,7 @@ async def get_container_quay_volumes(
             query += " AND t.shiftDate <= ?"
             params.append(endDate)
         
-        if companyId:
-            query += " AND t.consigneeId = ?"
-            params.append(companyId)
+        # companyId is hardcoded as 'CNT' - removed from query filters
         
         if shipId:
             query += " AND t.vesselId = ?"
@@ -1737,7 +1729,7 @@ async def get_container_quay_volumes(
             
             volume_item = ContainerQuayVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
-                companyId=str(row.get('consigneeId', '')) if row.get('consigneeId') else '',
+                companyId="CNT",
                 shipId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 classId=str(row.get('cargoDirectId', '')) if row.get('cargoDirectId') else '',
                 originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',  # Can be adjusted based on requirements
@@ -1785,7 +1777,6 @@ async def get_container_quay_volumes(
 async def get_container_gate_volumes(
     startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, từ ngày"),
     endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, đến ngày"),
-    companyId: Optional[str] = Query(None, description="Lọc các bản ghi theo đơn vị công ty"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
     limit: Optional[int] = Query(20, description="Số lượng record mỗi trang (max 100)", ge=1, le=100),
@@ -1844,9 +1835,7 @@ async def get_container_gate_volumes(
             query += " AND t.shiftDate <= ?"
             params.append(endDate)
         
-        if companyId:
-            query += " AND t.consigneeId = ?"
-            params.append(companyId)
+        # companyId is hardcoded as 'CNT' - removed from query filters
         
         if handlingMethodId:
             query += " AND t.jobMethodName = ?"
@@ -1887,7 +1876,7 @@ async def get_container_gate_volumes(
             
             volume_item = ContainerGateVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
-                companyId=str(row.get('consigneeId', '')) if row.get('consigneeId') else '',
+                companyId="CNT",
                 originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
                 containerTEU=container_teu,
