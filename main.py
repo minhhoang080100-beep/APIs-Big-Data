@@ -1449,7 +1449,7 @@ async def get_bulk_gate_volumes(
             volume_item = BulkGateVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
-                companyId=str(row.get('consigneeId', '')) if row.get('consigneeId') else '',
+                companyId="CNT",
                 cargoTypeId=str(row.get('cargoGroupId', '')) if row.get('cargoGroupId') else '',
                 cargoCategoryId=str(row.get('cargoId', '')) if row.get('cargoId') else '',
                 handlingMethodId=str(row.get('jobMethodId', '')) if row.get('jobMethodId') else '',
