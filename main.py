@@ -1379,7 +1379,8 @@ async def get_bulk_gate_volumes(
     API cung cấp sản lượng hàng rời theo qua cổng cảng và kho bãi
     
     **Filters applied:**
-    - vesselCode LIKE '%BÃI%' OR vesselCode LIKE '%KHO%'
+    - vesselTypeCode IN ('Warehouse', 'Bulk Yard')
+    - cargoGroupCode <> 'Hàng Container'
     - weightNetSum > 0
     - rowDeleted IS NULL (active records only)
     - Optional: startDate, endDate, companyId, handlingMethodId
@@ -1391,6 +1392,7 @@ async def get_bulk_gate_volumes(
     try:
         # Base query for bulk gate volumes from vwTallyShiftAll
         # Pattern 2: rowDeleted IS NULL for active records
+        # KHO/BAI is identified by vessel type instead of name/code text.
         query = """
             SELECT
                 t.shiftDate,
@@ -1399,6 +1401,8 @@ async def get_bulk_gate_volumes(
                 t.consigneeCode,
                 t.cargoId,
                 t.jobMethodId,
+                t.jobMethodCode,
+                t.jobMethodName,
                 t.vesselId,
                 t.weightNetSum,
                 c.cargoGroupId,
@@ -1406,12 +1410,14 @@ async def get_bulk_gate_volumes(
                 t.updateTime
             FROM dbo.vwTallyShiftAll t
             LEFT JOIN dbo.vwCargo c ON t.cargoId = c.cargoId
+            LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
             WHERE t.rowDeleted IS NULL
             AND t.weightNetSum > 0
-            AND (t.vesselCode LIKE ? OR t.vesselCode LIKE ?)
+            AND v.vesselTypeCode IN ('Warehouse', 'Bulk Yard')
+            AND (c.cargoGroupCode IS NULL OR c.cargoGroupCode <> N'Hàng Container')
         """
         
-        params = ['%BÃI%', '%KHO%']
+        params = []
         
         # Add optional filters
         if startDate:
@@ -1425,8 +1431,8 @@ async def get_bulk_gate_volumes(
         # companyId is hardcoded as 'CNT' - removed from query filters
         
         if handlingMethodId:
-            query += " AND t.jobMethodId = ?"
-            params.append(handlingMethodId)
+            query += " AND (CAST(t.jobMethodId AS nvarchar(50)) = ? OR t.jobMethodCode = ? OR t.jobMethodName = ?)"
+            params.extend([handlingMethodId, handlingMethodId, handlingMethodId])
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
@@ -1447,7 +1453,7 @@ async def get_bulk_gate_volumes(
                 companyId="CNT",
                 cargoTypeId=str(row.get('cargoGroupId', '')) if row.get('cargoGroupId') else '',
                 cargoCategoryId=str(row.get('cargoId', '')) if row.get('cargoId') else '',
-                handlingMethodId=str(row.get('jobMethodId', '')) if row.get('jobMethodId') else '',
+                handlingMethodId=row.get('jobMethodCode', '') or '',
                 bulkOriginId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 bulkWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
                 customerCode=row.get('consigneeCode', '') or ''
@@ -1499,8 +1505,9 @@ async def get_bulk_quay_volumes(
     API cung cấp sản lượng hàng rời tại cầu tàu/bến (không bao gồm container)
     
     **Filters applied:**
-    - jobMethodCode LIKE '%TAU%' (ship operations)
-    - cargoGroupCode <> 'Container' (exclude containers)
+    - statisticsGroupTypeIdList contains token '2' in vwJobMethodAll
+    - cargoGroupCode <> 'Hàng Container' (exclude containers)
+    - vesselTypeCode NOT IN ('Warehouse', 'Bulk Yard', 'Container Yard')
     - weightNetSum > 0
     - rowDeleted IS NULL (active records only)
     - Optional: startDate, endDate, companyId, shipId, handlingMethodId
@@ -1512,7 +1519,7 @@ async def get_bulk_quay_volumes(
     try:
         # Base query for bulk quay volumes from vwTallyShiftAll
         # Pattern 2: rowDeleted IS NULL for active records
-        # Need to join with vwCargo to filter out Container cargo
+        # Throughput quay volume is identified by job methods containing statistics group 2.
         query = """
             SELECT
                 t.shiftDate,
@@ -1521,6 +1528,8 @@ async def get_bulk_quay_volumes(
                 t.consigneeCode,
                 t.cargoId,
                 t.jobMethodId,
+                t.jobMethodCode,
+                t.jobMethodName,
                 t.vesselId,
                 t.agencyId,
                 t.cargoDirectId,
@@ -1531,13 +1540,16 @@ async def get_bulk_quay_volumes(
                 t.updateTime
             FROM dbo.vwTallyShiftAll t
             LEFT JOIN dbo.vwCargo c ON t.cargoId = c.cargoId
+            LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
+            JOIN dbo.vwJobMethodAll jm ON t.jobMethodId = jm.jobMethodId AND jm.rowDeleted = 0
             WHERE t.rowDeleted IS NULL
             AND t.weightNetSum > 0
-            AND t.jobMethodCode LIKE ?
-            AND (c.cargoGroupCode IS NULL OR c.cargoGroupCode <> 'Container')
+            AND (c.cargoGroupCode IS NULL OR c.cargoGroupCode <> N'Hàng Container')
+            AND (v.vesselTypeCode IS NULL OR v.vesselTypeCode NOT IN ('Warehouse', 'Bulk Yard', 'Container Yard'))
+            AND (',' + REPLACE(ISNULL(jm.statisticsGroupTypeIdList, ''), ' ', '') + ',') LIKE '%,2,%'
         """
         
-        params = ['%TAU%']
+        params = []
         
         # Add optional filters
         if startDate:
@@ -1555,8 +1567,8 @@ async def get_bulk_quay_volumes(
             params.append(shipId)
         
         if handlingMethodId:
-            query += " AND t.jobMethodId = ?"
-            params.append(handlingMethodId)
+            query += " AND (CAST(t.jobMethodId AS nvarchar(50)) = ? OR t.jobMethodCode = ? OR t.jobMethodName = ?)"
+            params.extend([handlingMethodId, handlingMethodId, handlingMethodId])
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
@@ -1579,7 +1591,7 @@ async def get_bulk_quay_volumes(
                 shipAgentId=str(row.get('agencyId', '')) if row.get('agencyId') else '',
                 cargoTypeId=str(row.get('cargoGroupId', '')) if row.get('cargoGroupId') else '',
                 cargoCategoryId=str(row.get('cargoId', '')) if row.get('cargoId') else '',
-                handlingMethodId=str(row.get('jobMethodId', '')) if row.get('jobMethodId') else '',
+                handlingMethodId=row.get('jobMethodCode', '') or '',
                 shipClassId=str(row.get('cargoDirectId', '')) if row.get('cargoDirectId') else '',
                 bulkOriginId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 bulkWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0
@@ -1631,9 +1643,11 @@ async def get_container_quay_volumes(
     API cung cấp sản lượng container tại cầu tàu/bến
     
     **Filters applied:**
-    - jobMethodCode LIKE '%TAU%' (ship operations)
+    - statisticsGroupTypeIdList contains token '2' in vwJobMethodAll
     - cargoGroupCode = 'Hàng Container' (ONLY containers)
-    - weightNetSum > 0
+    - quantityTotalSum > 0
+    - cargoCode in 20E, 20F, 40E, 40F, 45E, 45F
+    - vesselTypeCode <> 'Container Yard'
     - rowDeleted IS NULL (active records only)
     - Optional: startDate, endDate, companyId, shipId, handlingMethodId
     
@@ -1644,7 +1658,7 @@ async def get_container_quay_volumes(
     try:
         # Base query for container quay volumes from vwTallyShiftAll
         # Pattern 2: rowDeleted IS NULL for active records
-        # Join with vwCargo to filter ONLY Container cargo
+        # Throughput quay volume is identified by job methods containing statistics group 2.
         query = """
             SELECT
                 t.shiftDate,
@@ -1654,6 +1668,7 @@ async def get_container_quay_volumes(
                 t.consigneeFullName,
                 t.cargoId,
                 t.jobMethodId,
+                t.jobMethodCode,
                 t.jobMethodName,
                 t.vesselId,
                 t.agencyId,
@@ -1667,13 +1682,17 @@ async def get_container_quay_volumes(
                 t.updateTime
             FROM dbo.vwTallyShiftAll t
             LEFT JOIN dbo.vwCargo c ON t.cargoId = c.cargoId
+            LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
+            JOIN dbo.vwJobMethodAll jm ON t.jobMethodId = jm.jobMethodId AND jm.rowDeleted = 0
             WHERE t.rowDeleted IS NULL
-            AND t.weightNetSum > 0
-            AND t.jobMethodCode LIKE ?
-            AND c.cargoGroupCode = 'Hàng Container'
+            AND ISNULL(t.quantityTotalSum, 0) > 0
+            AND UPPER(LTRIM(RTRIM(t.cargoCode))) IN ('20E', '20F', '40E', '40F', '45E', '45F')
+            AND c.cargoGroupCode = N'Hàng Container'
+            AND (v.vesselTypeCode IS NULL OR v.vesselTypeCode <> 'Container Yard')
+            AND (',' + REPLACE(ISNULL(jm.statisticsGroupTypeIdList, ''), ' ', '') + ',') LIKE '%,2,%'
         """
         
-        params = ['%TAU%']
+        params = []
         
         # Add optional filters
         if startDate:
@@ -1691,8 +1710,8 @@ async def get_container_quay_volumes(
             params.append(shipId)
         
         if handlingMethodId:
-            query += " AND t.jobMethodName = ?"
-            params.append(handlingMethodId)
+            query += " AND (CAST(t.jobMethodId AS nvarchar(50)) = ? OR t.jobMethodCode = ? OR t.jobMethodName = ?)"
+            params.extend([handlingMethodId, handlingMethodId, handlingMethodId])
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
@@ -1735,7 +1754,7 @@ async def get_container_quay_volumes(
                 originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',  # Can be adjusted based on requirements
                 containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
                 containerTEU=container_teu,
-                handlingMethodId=row.get('jobMethodName', '') or '',
+                handlingMethodId=row.get('jobMethodCode', '') or '',
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
                 shipOperatorId='',
                 containerOperatorId=row.get('consigneeFullName', '') or ''
@@ -1787,7 +1806,9 @@ async def get_container_gate_volumes(
     
     **Filters applied:**
     - JOIN with vwVesselFull to filter vesselTypeCode = 'Container Yard'
-    - weightNetSum > 0
+    - cargoGroupCode = 'Hàng Container'
+    - quantityTotalSum > 0
+    - cargoCode in 20E, 20F, 40E, 40F, 45E, 45F
     - rowDeleted IS NULL (active records only)
     - Optional: startDate, endDate, companyId, handlingMethodId
     
@@ -1808,6 +1829,7 @@ async def get_container_gate_volumes(
                 t.consigneeFullName,
                 t.cargoId,
                 t.jobMethodId,
+                t.jobMethodCode,
                 t.jobMethodName,
                 t.vesselId,
                 t.vesselName,
@@ -1815,13 +1837,17 @@ async def get_container_gate_volumes(
                 t.quantityTotalSum,
                 t.cargoCode,
                 v.vesselTypeCode,
+                c.cargoGroupCode,
                 t.createTime,
                 t.updateTime
             FROM dbo.vwTallyShiftAll t
-            LEFT JOIN dbo.vwVesselFull v ON t.vesselName = v.vesselName
+            LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
+            LEFT JOIN dbo.vwCargo c ON t.cargoId = c.cargoId
             WHERE t.rowDeleted IS NULL
-            AND t.weightNetSum > 0
+            AND ISNULL(t.quantityTotalSum, 0) > 0
+            AND UPPER(LTRIM(RTRIM(t.cargoCode))) IN ('20E', '20F', '40E', '40F', '45E', '45F')
             AND v.vesselTypeCode = 'Container Yard'
+            AND c.cargoGroupCode = N'Hàng Container'
         """
         
         params = []
@@ -1838,8 +1864,8 @@ async def get_container_gate_volumes(
         # companyId is hardcoded as 'CNT' - removed from query filters
         
         if handlingMethodId:
-            query += " AND t.jobMethodName = ?"
-            params.append(handlingMethodId)
+            query += " AND (CAST(t.jobMethodId AS nvarchar(50)) = ? OR t.jobMethodCode = ? OR t.jobMethodName = ?)"
+            params.extend([handlingMethodId, handlingMethodId, handlingMethodId])
         
         # Calculate offset for pagination
         offset = (page - 1) * limit
@@ -1880,7 +1906,7 @@ async def get_container_gate_volumes(
                 originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
                 containerTEU=container_teu,
-                handlingMethodId=row.get('jobMethodName', '') or '',
+                handlingMethodId=row.get('jobMethodCode', '') or '',
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
                 containerOperatorId=row.get('consigneeFullName', '') or ''
             )
