@@ -1,7 +1,7 @@
 """
 FastAPI Application - TOS Big Data API Server
 """
-from fastapi import FastAPI, HTTPException, Depends, status, Query
+from fastapi import FastAPI, HTTPException, Depends, status, Query, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta, datetime
 from typing import Optional
@@ -79,6 +79,24 @@ async def root():
             "redoc": "/redoc"
         }
     }
+
+
+@app.head("/")
+async def head_root():
+    """Lightweight HEAD response for uptime monitors."""
+    return Response(status_code=status.HTTP_200_OK)
+
+
+@app.get("/healthz", include_in_schema=False)
+async def health_check():
+    """Lightweight health check endpoint for uptime monitors."""
+    return {"status": "ok"}
+
+
+@app.head("/healthz", include_in_schema=False)
+async def head_health_check():
+    """Lightweight HEAD response for uptime monitors."""
+    return Response(status_code=status.HTTP_200_OK)
 
 
 @app.post(
