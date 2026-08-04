@@ -215,6 +215,34 @@ class ShipSingleResponse(BaseModel):
 
 
 # ============================================================
+# Origins (Nguồn gốc) Schemas
+# ============================================================
+
+class OriginData(BaseModel):
+    """Schema for Origin data"""
+    reportDate: str = Field(..., description="Ngày lấy dữ liệu")
+    originId: int = Field(..., description="ID nguồn gốc hàng hóa")
+    originName: str = Field("", description="Tên nguồn gốc hàng hóa")
+    createdAt: Optional[str] = Field(None, description="Ngày tạo bản ghi")
+    updatedAt: Optional[str] = Field(None, description="Ngày sửa bản ghi")
+
+
+class OriginListResponse(BaseModel):
+    """Response for origin list endpoint"""
+    code: str = Field("1", description="Mã trả về (1 = thành công)")
+    message: str = Field("", description="Thông báo")
+    data: List[OriginData] = Field(default_factory=list)
+
+
+class OriginSingleResponse(BaseModel):
+    """Response for single origin endpoint"""
+    code: str = Field("1", description="Mã trả về")
+    message: str = Field("", description="Thông báo")
+    data: Optional[OriginData] = None
+
+
+
+# ============================================================
 # Bulk Gate Volumes (Hàng Rời qua Cổng Cảng/Kho Bãi) Schemas
 # ============================================================
 
@@ -280,6 +308,8 @@ class ContainerQuayVolumeData(BaseModel):
     finishDate: str = Field(..., description="Ngày ghi nhận sản lượng")
     shipOperatorId: str = Field(..., description="Chủ khai thác của tàu")
     containerOperatorId: str = Field(..., description="Chủ khai thác vận container")
+    containerSizeId: Optional[int] = Field(None, description="Id kích cỡ container")
+    direction: Optional[str] = Field(None, description="Chiều xếp dỡ (NHAP/XUAT/KHAC)")
 
 
 class ContainerQuayVolumeListResponse(BaseModel):
@@ -303,6 +333,7 @@ class ContainerGateVolumeData(BaseModel):
     handlingMethodId: str = Field(..., description="Phương án tác nghiệp (onmode), container di chuyển các trong cảng")
     finishDate: str = Field(..., description="Ngày ghi nhận sản lượng")
     containerOperatorId: str = Field(..., description="Mã của vụ container")
+    containerSizeId: Optional[int] = Field(None, description="Id kích cỡ container")
 
 
 class ContainerGateVolumeListResponse(BaseModel):
@@ -310,3 +341,27 @@ class ContainerGateVolumeListResponse(BaseModel):
     code: str = Field("1", description="Mã trả về (1 = thành công)")
     message: str = Field("", description="Thông báo")
     data: List[ContainerGateVolumeData] = Field(default_factory=list)
+
+
+# ============================================================
+# Container Size (Kích cỡ Container) Schemas
+# ============================================================
+
+class ContainerSizeData(BaseModel):
+    """Schema for Container Size data"""
+    reportDate: str = Field(..., description="Ngày lấy dữ liệu")
+    containerSizeId: int = Field(..., description="Id kích cỡ container")
+    localSzTp: str = Field(..., description="Local size type")
+    isoSzTp: str = Field(..., description="ISO size type")
+    sizeCode: str = Field(..., description="Mã size container")
+    heightCode: str = Field(..., description="Mã chiều cao container")
+    containerTypeCode: str = Field(..., description="Mã loại container")
+    createdAt: Optional[str] = Field(None, description="Ngày tạo bản ghi")
+    updatedAt: Optional[str] = Field(None, description="Ngày sửa bản ghi")
+
+
+class ContainerSizeResponse(BaseModel):
+    """Response for container size list endpoint"""
+    code: str = Field("1", description="Mã trả về (1 = thành công)")
+    message: str = Field("", description="Thông báo")
+    data: List[ContainerSizeData] = Field(default_factory=list)

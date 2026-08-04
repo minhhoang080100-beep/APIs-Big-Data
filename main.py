@@ -1,13 +1,15 @@
 """
 FastAPI Application - TOS Big Data API Server
 """
-from fastapi import FastAPI, HTTPException, Depends, status, Query, Response
+from fastapi import FastAPI, HTTPException, Depends, status, Query, Response, Path
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import timedelta, datetime
 from typing import Optional
 import logging
 
 from schemas import (
+    OriginListResponse,
+    OriginSingleResponse,
     LoginRequest, 
     LoginResponse, 
     ErrorResponse,
@@ -37,7 +39,9 @@ from schemas import (
     ContainerQuayVolumeListResponse,
     ContainerQuayVolumeData,
     ContainerGateVolumeListResponse,
-    ContainerGateVolumeData
+    ContainerGateVolumeData,
+    ContainerSizeResponse,
+    ContainerSizeData
 )
 from database import db
 from auth import (
@@ -279,8 +283,8 @@ async def get_customers(
             query += " AND partnerTaxCode = ?"
             params.append(customerTaxCode)
         
-        # Filter out deleted records (only get rowDeleted = 0)
-        query += " AND rowDeleted = 0"
+        # Filter out deleted and invisible records
+        query += " AND rowDeleted = 0 AND ISNULL(rowInvisible, 0) = 0"
         
         # Add ordering
         query += " ORDER BY partnerCode"
@@ -380,6 +384,7 @@ async def get_customer_by_id(
             FROM dbo.Partner
             WHERE partnerCode = ?
             AND rowDeleted = 0
+            AND ISNULL(rowInvisible, 0) = 0
         """
         
         results = db.execute_query(query, (customer_id,))
@@ -436,20 +441,18 @@ async def get_customer_by_id(
 # Cargo Category API Endpoints
 
 @app.get(
-    "/api/cargoCategory",
+    "/api/cargoType",
     response_model=CargoListResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
         401: {"description": "Chưa xác thực"},
         500: {"description": "Lỗi server"}
     },
-    summary="Lấy danh sách nhóm hàng hóa",
-    tags=["Cargo Category"]
+    summary="Lấy danh sách loại hàng hóa cụ thể",
+    tags=["Cargo Type"]
 )
 async def get_cargo_categories(
     cargoTypeId: Optional[int] = Query(None, description="Lọc theo loại hàng"),
-    page: Optional[int] = Query(1, description="Trang hiện tại (pagination)", ge=1),
-    limit: Optional[int] = Query(50, description="Số lượng records mỗi trang", ge=1, le=100),
     companyId: Optional[str] = Query(None, description="Mã công ty"),
     current_user = Depends(get_current_user)
 ):
@@ -489,6 +492,7 @@ async def get_cargo_categories(
                 cargoGroupBillingDescription
             FROM dbo.vwCargo
             WHERE 1=1
+            AND ISNULL(rowInvisible, 0) = 0
         """
         
         params = []
@@ -498,15 +502,9 @@ async def get_cargo_categories(
             query += " AND cargoGroupId = ?"
             params.append(cargoTypeId)
         
-        # Filter out deleted records (only get rowDeleted = 0)
+        # Filter out deleted and invisible records
         query += " AND rowDeleted = 0"
-        
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
-        
-        # Add ordering and pagination
-        query += " ORDER BY cargoId OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
-        params.extend([offset, limit])
+        query += " ORDER BY cargoId"
         
         # Execute query
         results = db.execute_query(query, tuple(params) if params else None)
@@ -525,7 +523,7 @@ async def get_cargo_categories(
             )
             cargos.append(cargo)
         
-        logger.info(f"Returned {len(cargos)} cargo categories (page {page}, limit {limit})")
+        logger.info(f"Returned {len(cargos)} cargo categories")
         
         return CargoListResponse(
             code="1",
@@ -545,15 +543,15 @@ async def get_cargo_categories(
 
 
 @app.get(
-    "/api/cargoCategory/{cargo_id}",
+    "/api/cargoType/{cargo_id}",
     response_model=CargoSingleResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
-        404: {"description": "Không tìm thấy nhóm hàng"},
+        404: {"description": "Không tìm thấy loại hàng hóa"},
         401: {"description": "Chưa xác thực"}
     },
-    summary="Lấy thông tin nhóm hàng hóa theo ID",
-    tags=["Cargo Category"]
+    summary="Lấy thông tin loại hàng hóa cụ thể theo ID",
+    tags=["Cargo Type"]
 )
 async def get_cargo_by_id(
     cargo_id: int,
@@ -594,6 +592,7 @@ async def get_cargo_by_id(
             FROM dbo.vwCargo
             WHERE cargoId = ?
             AND rowDeleted = 0
+            AND ISNULL(rowInvisible, 0) = 0
         """
         
         results = db.execute_query(query, (cargo_id,))
@@ -642,19 +641,17 @@ async def get_cargo_by_id(
 # Cargo Type API Endpoints
 
 @app.get(
-    "/api/cargoType",
+    "/api/cargoCategory",
     response_model=CargoTypeListResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
         401: {"description": "Chưa xác thực"},
         500: {"description": "Lỗi server"}
     },
-    summary="Lấy danh sách loại hàng hóa",
-    tags=["Cargo Type"]
+    summary="Lấy danh sách nhóm hàng hóa",
+    tags=["Cargo Category"]
 )
 async def get_cargo_types(
-    page: Optional[int] = Query(1, description="Trang hiện tại (pagination)", ge=1),
-    limit: Optional[int] = Query(20, description="Số lượng records mỗi trang", ge=1, le=100),
     companyId: Optional[str] = Query(None, description="Mã công ty"),
     current_user = Depends(get_current_user)
 ):
@@ -673,27 +670,19 @@ async def get_cargo_types(
         # Query to get distinct cargo group types
         # Note: We use cargoGroupId and cargoGroupName to represent cargo types
         query = """
-            SELECT DISTINCT
+            SELECT 
                 cargoGroupId,
                 cargoGroupCode,
                 cargoGroupName,
-                MIN(createTime) as createTime,
-                MAX(updateTime) as updateTime
-            FROM dbo.vwCargo
-            WHERE rowDeleted = 0
-            AND cargoGroupId IS NOT NULL
-            AND cargoGroupName IS NOT NULL
-            GROUP BY cargoGroupId, cargoGroupCode, cargoGroupName
+                createTime,
+                updateTime
+            FROM dbo.CargoGroup
+            WHERE ISNULL(rowDeleted, 0) = 0
+            AND ISNULL(rowInvisible, 0) = 0
         """
         
         params = []
-        
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
-        
-        # Add ordering and pagination
-        query += " ORDER BY cargoGroupId OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
-        params.extend([offset, limit])
+        query += " ORDER BY cargoGroupId"
         
         # Execute query
         results = db.execute_query(query, tuple(params) if params else None)
@@ -703,14 +692,14 @@ async def get_cargo_types(
         for row in results:
             cargo_type = CargoTypeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
-                cargoTypeId=str(row.get('cargoGroupId', '') or row.get('cargoGroupCode', '')),
+                cargoTypeId=str(row.get('cargoGroupId', '')),
                 cargoTypeName=row.get('cargoGroupName', '') or '',
                 createdDate=row.get('createTime', None),
                 modifiedDate=row.get('updateTime', None)
             )
             cargo_types.append(cargo_type)
         
-        logger.info(f"Returned {len(cargo_types)} cargo types (page {page}, limit {limit})")
+        logger.info(f"Returned {len(cargo_types)} cargo types")
         
         return CargoTypeListResponse(
             code="1",
@@ -730,15 +719,15 @@ async def get_cargo_types(
 
 
 @app.get(
-    "/api/cargoType/{cargo_type_id}",
+    "/api/cargoCategory/{cargo_type_id}",
     response_model=CargoTypeSingleResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
-        404: {"description": "Không tìm thấy loại hàng"},
+        404: {"description": "Không tìm thấy nhóm hàng"},
         401: {"description": "Chưa xác thực"}
     },
-    summary="Lấy thông tin loại hàng hóa theo ID",
-    tags=["Cargo Type"]
+    summary="Lấy thông tin nhóm hàng hóa theo ID",
+    tags=["Cargo Category"]
 )
 async def get_cargo_type_by_id(
     cargo_type_id: str,
@@ -768,7 +757,8 @@ async def get_cargo_type_by_id(
                     MAX(updateTime) as updateTime
                 FROM dbo.vwCargo
                 WHERE cargoGroupId = ?
-                AND rowDeleted = 0
+                AND ISNULL(rowDeleted, 0) = 0
+                AND ISNULL(rowInvisible, 0) = 0
                 GROUP BY cargoGroupId, cargoGroupCode, cargoGroupName
             """
             results = db.execute_query(query, (type_id_int,))
@@ -783,7 +773,8 @@ async def get_cargo_type_by_id(
                     MAX(updateTime) as updateTime
                 FROM dbo.vwCargo
                 WHERE cargoGroupCode = ?
-                AND rowDeleted = 0
+                AND ISNULL(rowDeleted, 0) = 0
+                AND ISNULL(rowInvisible, 0) = 0
                 GROUP BY cargoGroupId, cargoGroupCode, cargoGroupName
             """
             results = db.execute_query(query, (cargo_type_id,))
@@ -800,7 +791,7 @@ async def get_cargo_type_by_id(
         row = results[0]
         cargo_type = CargoTypeData(
             reportDate=datetime.now().strftime("%Y-%m-%d"),
-            cargoTypeId=str(row.get('cargoGroupId', '') or row.get('cargoGroupCode', '')),
+            cargoTypeId=str(row.get('cargoGroupId', '')),
             cargoTypeName=row.get('cargoGroupName', '') or '',
             createdDate=row.get('createTime', None),
             modifiedDate=row.get('updateTime', None)
@@ -841,8 +832,6 @@ async def get_cargo_type_by_id(
     tags=["Handling Method"]
 )
 async def get_handling_methods(
-    page: Optional[int] = Query(1, description="Trang hiện tại (pagination)", ge=1),
-    limit: Optional[int] = Query(20, description="Số lượng records mỗi trang", ge=1, le=100),
     companyId: Optional[str] = Query(None, description="Mã công ty"),
     current_user = Depends(get_current_user)
 ):
@@ -867,20 +856,15 @@ async def get_handling_methods(
                 MIN(createTime) as createTime,
                 MAX(updateTime) as updateTime
             FROM dbo.vwJobMethodAll
-            WHERE rowDeleted = 0
+            WHERE ISNULL(rowDeleted, 0) = 0
+            AND ISNULL(rowInvisible, 0) = 0
             AND jobMethodCode IS NOT NULL
             AND jobMethodName IS NOT NULL
             GROUP BY jobMethodCode, jobMethodName
         """
         
         params = []
-        
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
-        
-        # Add ordering and pagination
-        query += " ORDER BY jobMethodCode OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
-        params.extend([offset, limit])
+        query += " ORDER BY jobMethodCode"
         
         # Execute query
         results = db.execute_query(query, tuple(params) if params else None)
@@ -897,7 +881,7 @@ async def get_handling_methods(
             )
             handling_methods.append(method)
         
-        logger.info(f"Returned {len(handling_methods)} handling methods (page {page}, limit {limit})")
+        logger.info(f"Returned {len(handling_methods)} handling methods")
         
         return HandlingMethodListResponse(
             code="1",
@@ -950,7 +934,8 @@ async def get_handling_method_by_id(
                 MIN(createTime) as createTime,
                 MAX(updateTime) as updateTime
             FROM dbo.vwJobMethodAll
-            WHERE rowDeleted = 0
+            WHERE ISNULL(rowDeleted, 0) = 0
+            AND ISNULL(rowInvisible, 0) = 0
             AND jobMethodCode = ?
             GROUP BY jobMethodCode, jobMethodName
         """
@@ -1010,8 +995,6 @@ async def get_handling_method_by_id(
     tags=["Class"]
 )
 async def get_classes(
-    page: Optional[int] = Query(1, description="Trang hiện tại (pagination)", ge=1),
-    limit: Optional[int] = Query(20, description="Số lượng records mỗi trang", ge=1, le=100),
     companyId: Optional[str] = Query(None, description="Mã công ty"),
     current_user = Depends(get_current_user)
 ):
@@ -1027,29 +1010,21 @@ async def get_classes(
     logger.info(f"Class list request by {current_user.username}")
     
     try:
-        # Query to get distinct classes (cargo directions) from vwTallyShiftAll
-        # vwTallyShiftAll uses NULL for active records, not 0
+        # Query from CargoDirect master table (danh mục hướng tàu gốc)
         query = """
-            SELECT DISTINCT
+            SELECT
+                cargoDirectId,
                 cargoDirectCode,
                 cargoDirectName,
-                MIN(createTime) as createTime,
-                MAX(updateTime) as updateTime
-            FROM dbo.vwTallyShiftAll
-            WHERE rowDeleted IS NULL
-            AND cargoDirectCode IS NOT NULL
-            AND cargoDirectName IS NOT NULL
-            GROUP BY cargoDirectCode, cargoDirectName
+                createTime,
+                updateTime
+            FROM dbo.CargoDirect
+            WHERE ISNULL(rowDeleted, 0) = 0
+            AND ISNULL(rowInvisible, 0) = 0
         """
         
         params = []
-        
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
-        
-        # Add ordering and pagination
-        query += " ORDER BY cargoDirectCode OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
-        params.extend([offset, limit])
+        query += " ORDER BY cargoDirectId"
         
         # Execute query
         results = db.execute_query(query, tuple(params) if params else None)
@@ -1059,14 +1034,14 @@ async def get_classes(
         for row in results:
             class_item = ClassData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
-                classId=str(row.get('cargoDirectCode', '')),
+                classId=str(row.get('cargoDirectId', '')),
                 className=row.get('cargoDirectName', '') or '',
                 createdDate=row.get('createTime', None),
                 modifiedDate=row.get('updateTime', None)
             )
             classes.append(class_item)
         
-        logger.info(f"Returned {len(classes)} classes (page {page}, limit {limit})")
+        logger.info(f"Returned {len(classes)} classes")
         
         return ClassListResponse(
             code="1",
@@ -1113,18 +1088,19 @@ async def get_class_by_id(
     
     try:
         query = """
-            SELECT DISTINCT
+            SELECT
+                cargoDirectId,
                 cargoDirectCode,
                 cargoDirectName,
-                MIN(createTime) as createTime,
-                MAX(updateTime) as updateTime
-            FROM dbo.vwTallyShiftAll
-            WHERE rowDeleted IS NULL
-            AND cargoDirectCode = ?
-            GROUP BY cargoDirectCode, cargoDirectName
+                createTime,
+                updateTime
+            FROM dbo.CargoDirect
+            WHERE ISNULL(rowDeleted, 0) = 0
+            AND ISNULL(rowInvisible, 0) = 0
+            AND (CAST(cargoDirectId AS VARCHAR) = ? OR cargoDirectCode = ?)
         """
         
-        results = db.execute_query(query, (class_id,))
+        results = db.execute_query(query, (class_id, class_id))
         
         if not results:
             raise HTTPException(
@@ -1138,7 +1114,7 @@ async def get_class_by_id(
         row = results[0]
         class_item = ClassData(
             reportDate=datetime.now().strftime("%Y-%m-%d"),
-            classId=str(row.get('cargoDirectCode', '')),
+            classId=str(row.get('cargoDirectId', '')),
             className=row.get('cargoDirectName', '') or '',
             createdDate=row.get('createTime', None),
             modifiedDate=row.get('updateTime', None)
@@ -1179,8 +1155,6 @@ async def get_class_by_id(
     tags=["Ship Details"]
 )
 async def get_ships(
-    page: Optional[int] = Query(1, description="Trang hiện tại (pagination)", ge=1),
-    limit: Optional[int] = Query(20, description="Số lượng records mỗi trang", ge=1, le=100),
     companyId: Optional[str] = Query(None, description="Mã công ty"),
     current_user = Depends(get_current_user)
 ):
@@ -1218,16 +1192,12 @@ async def get_ships(
             FROM dbo.Vessel v
             LEFT JOIN dbo.VesselType vt ON v.vesselTypeId = vt.vesselTypeId
             WHERE v.rowDeleted = 0
+            AND ISNULL(v.rowInvisible, 0) = 0
+            AND (vt.vesselTypeCode IS NULL OR vt.vesselTypeCode NOT IN ('Warehouse', 'Container Yard', 'Bulk Yard'))
         """
         
         params = []
-        
-        # Calculate offset for pagination
-        offset = (page - 1) * limit
-        
-        # Add ordering and pagination
-        query += " ORDER BY vesselId OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
-        params.extend([offset, limit])
+        query += " ORDER BY vesselId"
         
         # Execute query
         results = db.execute_query(query, tuple(params) if params else None)
@@ -1253,7 +1223,7 @@ async def get_ships(
             )
             ships.append(ship_item)
         
-        logger.info(f"Returned {len(ships)} ships (page {page}, limit {limit})")
+        logger.info(f"Returned {len(ships)} ships")
         
         return ShipListResponse(
             code="1",
@@ -1319,6 +1289,8 @@ async def get_ship_by_imo(
             FROM dbo.Vessel v
             LEFT JOIN dbo.VesselType vt ON v.vesselTypeId = vt.vesselTypeId
             WHERE v.rowDeleted = 0
+            AND ISNULL(v.rowInvisible, 0) = 0
+            AND (vt.vesselTypeCode IS NULL OR vt.vesselTypeCode NOT IN ('Warehouse', 'Container Yard', 'Bulk Yard'))
             AND v.numberIMO = ?
         """
         
@@ -1368,6 +1340,263 @@ async def get_ship_by_imo(
             detail={
                 "code": "0",
                 "message": f"Lỗi lấy dữ liệu: {str(e)}"
+            }
+        )
+# ============================================================
+# Container Size
+# ============================================================
+# Origins (Nguồn gốc) API Endpoints
+# ============================================================
+
+@app.get(
+    "/api/origins",
+    response_model=OriginListResponse,
+    responses={
+        200: {"description": "Lấy dữ liệu thành công"},
+        401: {"description": "Chưa xác thực"},
+        500: {"description": "Lỗi server"}
+    },
+    summary="Lấy danh sách nguồn gốc hàng hóa",
+    tags=["Origins"]
+)
+async def get_origins(
+    origin: Optional[str] = Query(None, description="Lọc kết quả theo loại nguồn gốc"),
+    companyId: Optional[str] = Query(None, description="Mã công ty"),
+    page: int = Query(1, description="Page number cho phân trang", ge=1),
+    limit: int = Query(20, description="Số lượng record mỗi trang (max 100)", ge=1, le=100),
+    current_user = Depends(get_current_user)
+):
+    """
+    Lấy danh sách nguồn gốc hàng hóa
+    
+    - **origin**: Lọc theo tên nguồn gốc
+    - **companyId**: Mã công ty (optional)
+    
+    **Yêu cầu**: Bearer token từ /api/login
+    """
+    logger.info(f"Origins list request by {current_user.username}")
+    
+    try:
+        # Build base query for CargoOrigin
+        query = """
+            SELECT 
+                cargoOriginId,
+                cargoOriginCode,
+                cargoOriginName,
+                createTime,
+                updateTime
+            FROM dbo.CargoOrigin
+            WHERE ISNULL(rowDeleted, 0) = 0
+            AND ISNULL(rowInvisible, 0) = 0
+        """
+        
+        params = []
+        
+        if origin:
+            query += " AND cargoOriginName LIKE ?"
+            params.append(f"%{origin}%")
+            
+        offset = (page - 1) * limit
+        query += " ORDER BY cargoOriginCode"
+        query += " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
+        params.extend([offset, limit])
+        
+        # Execute query
+        rows = db.execute_query(query, params)
+        
+        # Format response
+        data = []
+        for row in rows:
+            data.append({
+                "reportDate": datetime.now().strftime("%Y-%m-%d"),
+                "originId": int(row.get('cargoOriginId', 0)),
+                "originName": str(row.get('cargoOriginName', '')).replace("Hàng ", "").replace("nội", "Nội địa").replace("ngoại", "Ngoại") if row.get('cargoOriginName') else '',
+                "createdAt": row.get('createTime').strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(row.get('createTime'), "strftime") else (str(row.get('createTime')) + "Z" if row.get('createTime') else None),
+                "updatedAt": row.get('updateTime').strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(row.get('updateTime'), "strftime") else (str(row.get('updateTime')) + "Z" if row.get('updateTime') else None)
+            })
+            
+        return {
+            "code": "1",
+            "message": "Lấy dữ liệu thành công",
+            "data": data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching origins: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get(
+    "/api/origins/{originId}",
+    response_model=OriginSingleResponse,
+    responses={
+        200: {"description": "Lấy dữ liệu thành công"},
+        404: {"description": "Không tìm thấy dữ liệu"},
+        401: {"description": "Chưa xác thực"},
+        500: {"description": "Lỗi server"}
+    },
+    summary="Lấy một nguồn gốc cụ thể với ID",
+    tags=["Origins"]
+)
+async def get_origin_by_id(
+    originId: str = Path(..., description="Mã độc nhất định danh nguồn gốc hàng hóa"),
+    current_user = Depends(get_current_user)
+):
+    """
+    Lấy một nguồn gốc cụ thể với ID
+    
+    **Yêu cầu**: Bearer token từ /api/login
+    """
+    logger.info(f"Origin by ID request ({originId}) by {current_user.username}")
+    
+    try:
+        query = """
+            SELECT 
+                cargoOriginId,
+                cargoOriginName,
+                createTime,
+                updateTime
+            FROM dbo.CargoOrigin
+            WHERE ISNULL(rowDeleted, 0) = 0 
+            AND ISNULL(rowInvisible, 0) = 0
+            AND CAST(cargoOriginId AS VARCHAR) = ?
+        """
+        
+        rows = db.execute_query(query, [originId])
+        
+        if not rows:
+            return {
+                "code": "0",
+                "message": "Không tìm thấy dữ liệu",
+                "data": None
+            }
+            
+        row = rows[0]
+        data = {
+            "reportDate": datetime.now().strftime("%Y-%m-%d"),
+            "originId": int(row.get('cargoOriginId', 0)),
+            "originName": str(row.get('cargoOriginName', '')).replace("Hàng ", "").replace("nội", "Nội địa").replace("ngoại", "Ngoại") if row.get('cargoOriginName') else '',
+            "createdAt": row.get('createTime').strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(row.get('createTime'), "strftime") else (str(row.get('createTime')) + "Z" if row.get('createTime') else None),
+            "updatedAt": row.get('updateTime').strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(row.get('updateTime'), "strftime") else (str(row.get('updateTime')) + "Z" if row.get('updateTime') else None)
+        }
+            
+        return {
+            "code": "1",
+            "message": "Lấy dữ liệu thành công",
+            "data": data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching origin by id: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================
+
+@app.get(
+    "/api/containerSize",
+    response_model=ContainerSizeResponse,
+    responses={
+        200: {"description": "Lấy dữ liệu thành công"},
+        401: {"description": "Chưa xác thực"},
+        500: {"description": "Lỗi server"}
+    },
+    summary="Lấy danh sách kích cỡ container",
+    tags=["Container Size"]
+)
+async def get_container_sizes(
+    containerSizeId: str = Query(None, description="Lọc kết quả theo kích thước container"),
+    companyId: str = Query(None, description="Lọc các bản ghi liên quan đến mã công ty cảng biển"),
+    current_user = Depends(get_current_user)
+):
+    """
+    API cung cấp thông tin kích thước container
+    
+    **Yêu cầu**: Bearer token từ /api/login
+    """
+    logger.info(f"Container sizes request by {current_user.username}")
+    
+    try:
+        query = """
+            SELECT
+                containerSizeTypeId,
+                containerSizeTypeDomesticCode,
+                containerSizeTypeCode,
+                containerLengthFt,
+                containerHeightFt,
+                createTime,
+                updateTime
+            FROM dbo.vwContainerSizeTypeDomestic
+            WHERE ISNULL(rowDeleted, 0) = 0
+            AND ISNULL(rowInvisible, 0) = 0
+        """
+        params = []
+        
+        if containerSizeId:
+            query += " AND CAST(containerSizeTypeId AS VARCHAR) = ?"
+            params.append(containerSizeId)
+            
+        query += " ORDER BY containerSizeTypeId"
+        
+        results = db.execute_query(query, tuple(params))
+        
+        items = []
+        for row in results:
+            domestic_code = row.get('containerSizeTypeDomesticCode') or ''
+            type_code = domestic_code[-2:] if len(domestic_code) >= 2 else ''
+            
+            length = row.get('containerLengthFt')
+            size_code = domestic_code[:2] if len(domestic_code) >= 2 else (str(int(length)) if length is not None else '')
+            
+            height = row.get('containerHeightFt')
+            height_code = str(int(height * 10)) if height is not None else ''
+            
+            iso_code = row.get('containerSizeTypeCode') or ''
+            if not height_code and len(iso_code) >= 2:
+                height_char = iso_code[1]
+                if height_char == '2':
+                    height_code = '86'
+                elif height_char == '5':
+                    height_code = '95'
+                elif height_char == '0':
+                    height_code = '80'
+            
+            created_date = row.get('createTime')
+            if created_date and hasattr(created_date, 'strftime'):
+                created_date_str = created_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            else:
+                created_date_str = str(created_date) if created_date else None
+                
+            modified_date = row.get('updateTime')
+            if modified_date and hasattr(modified_date, 'strftime'):
+                modified_date_str = modified_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            else:
+                modified_date_str = str(modified_date) if modified_date else None
+
+            item = ContainerSizeData(
+                reportDate=datetime.now().strftime("%Y-%m-%d"),
+                containerSizeId=int(row.get('containerSizeTypeId', 0)),
+                localSzTp=domestic_code,
+                isoSzTp=row.get('containerSizeTypeCode') or '',
+                sizeCode=size_code,
+                heightCode=height_code,
+                containerTypeCode=type_code,
+                createdAt=created_date_str,
+                updatedAt=modified_date_str
+            )
+            items.append(item)
+            
+        return ContainerSizeResponse(
+            code="1",
+            message="Lấy dữ liệu thành công" if items else "Không có dữ liệu",
+            data=items
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in container sizes API: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "0",
+                "message": f"Lỗi hệ thống: {str(e)}"
             }
         )
 
@@ -1430,6 +1659,7 @@ async def get_bulk_gate_volumes(
             LEFT JOIN dbo.vwCargo c ON t.cargoId = c.cargoId
             LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
             WHERE t.rowDeleted IS NULL
+            AND ISNULL(t.rowInvisible, 0) = 0
             AND t.weightNetSum > 0
             AND v.vesselTypeCode IN ('Warehouse', 'Bulk Yard')
             AND (c.cargoGroupCode IS NULL OR c.cargoGroupCode <> N'Hàng Container')
@@ -1478,7 +1708,7 @@ async def get_bulk_gate_volumes(
             )
             volumes.append(volume_item)
         
-        logger.info(f"Returned {len(volumes)} bulk gate volume records (page {page}, limit {limit})")
+        logger.info(f"Returned {len(volumes)} bulk gate volume records")
         
         return BulkGateVolumeListResponse(
             code="1",
@@ -1561,6 +1791,7 @@ async def get_bulk_quay_volumes(
             LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
             JOIN dbo.vwJobMethodAll jm ON t.jobMethodId = jm.jobMethodId AND jm.rowDeleted = 0
             WHERE t.rowDeleted IS NULL
+            AND ISNULL(t.rowInvisible, 0) = 0
             AND t.weightNetSum > 0
             AND (c.cargoGroupCode IS NULL OR c.cargoGroupCode <> N'Hàng Container')
             AND (v.vesselTypeCode IS NULL OR v.vesselTypeCode NOT IN ('Warehouse', 'Bulk Yard', 'Container Yard'))
@@ -1616,7 +1847,7 @@ async def get_bulk_quay_volumes(
             )
             volumes.append(volume_item)
         
-        logger.info(f"Returned {len(volumes)} bulk quay volume records (page {page}, limit {limit})")
+        logger.info(f"Returned {len(volumes)} bulk quay volume records")
         
         return BulkQuayVolumeListResponse(
             code="1",
@@ -1697,12 +1928,19 @@ async def get_container_quay_volumes(
                 c.cargoGroupCode,
                 c.cargoGroupId,
                 t.createTime,
-                t.updateTime
+                t.updateTime,
+                CASE 
+                    WHEN REPLACE(jm.jobMethodCode, 'CONT ', '') LIKE 'TAU%' THEN 'NHAP'
+                    WHEN jm.jobMethodCode LIKE '%TAU%' 
+                         AND REPLACE(jm.jobMethodCode, 'CONT ', '') NOT LIKE 'TAU%' THEN 'XUAT'
+                    ELSE 'KHAC'
+                END as direction
             FROM dbo.vwTallyShiftAll t
             LEFT JOIN dbo.vwCargo c ON t.cargoId = c.cargoId
             LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
             JOIN dbo.vwJobMethodAll jm ON t.jobMethodId = jm.jobMethodId AND jm.rowDeleted = 0
             WHERE t.rowDeleted IS NULL
+            AND ISNULL(t.rowInvisible, 0) = 0
             AND ISNULL(t.quantityTotalSum, 0) > 0
             AND UPPER(LTRIM(RTRIM(t.cargoCode))) IN ('20E', '20F', '40E', '40F', '45E', '45F')
             AND c.cargoGroupCode = N'Hàng Container'
@@ -1752,17 +1990,38 @@ async def get_container_quay_volumes(
             # 20ft containers (20E, 20F) = quantity * 1
             # 40ft containers (40E, 40F) = quantity * 2
             # 45ft containers (45E, 45F) = quantity * 2.25
-            if cargo_code in ['20E', '20F']:
+            if cargo_code == '20F':
                 teu_multiplier = 1.0
-            elif cargo_code in ['40E', '40F']:
+                container_size_id = 73
+                weight_multiplier = 25.0
+            elif cargo_code == '20E':
+                teu_multiplier = 1.0
+                container_size_id = 73
+                weight_multiplier = 2.25
+            elif cargo_code == '40F':
                 teu_multiplier = 2.0
-            elif cargo_code in ['45E', '45F']:
+                container_size_id = 241
+                weight_multiplier = 30.0
+            elif cargo_code == '40E':
+                teu_multiplier = 2.0
+                container_size_id = 241
+                weight_multiplier = 3.88
+            elif cargo_code == '45F':
                 teu_multiplier = 2.25
+                container_size_id = 321
+                weight_multiplier = 30.0
+            elif cargo_code == '45E':
+                teu_multiplier = 2.25
+                container_size_id = 321
+                weight_multiplier = 3.88
             else:
                 # Default to 1 for unknown cargo codes
                 teu_multiplier = 1.0
+                container_size_id = None
+                weight_multiplier = 0.0
             
             container_teu = int(quantity * teu_multiplier)
+            container_weight = quantity * weight_multiplier
             
             volume_item = ContainerQuayVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
@@ -1770,16 +2029,18 @@ async def get_container_quay_volumes(
                 shipId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 classId=str(row.get('cargoDirectId', '')) if row.get('cargoDirectId') else '',
                 originId=str(row.get('vesselId', '')) if row.get('vesselId') else '',  # Can be adjusted based on requirements
-                containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
+                containerWeight=float(container_weight),
                 containerTEU=container_teu,
                 handlingMethodId=row.get('jobMethodCode', '') or '',
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
                 shipOperatorId='',
-                containerOperatorId=row.get('consigneeFullName', '') or ''
+                containerOperatorId=row.get('consigneeFullName', '') or '',
+                containerSizeId=container_size_id,
+                direction=row.get('direction', '')
             )
             volumes.append(volume_item)
         
-        logger.info(f"Returned {len(volumes)} container quay volume records (page {page}, limit {limit})")
+        logger.info(f"Returned {len(volumes)} container quay volume records")
         
         return ContainerQuayVolumeListResponse(
             code="1",
@@ -1862,6 +2123,7 @@ async def get_container_gate_volumes(
             LEFT JOIN dbo.vwVesselFull v ON t.vesselId = v.vesselId
             LEFT JOIN dbo.vwCargo c ON t.cargoId = c.cargoId
             WHERE t.rowDeleted IS NULL
+            AND ISNULL(t.rowInvisible, 0) = 0
             AND ISNULL(t.quantityTotalSum, 0) > 0
             AND UPPER(LTRIM(RTRIM(t.cargoCode))) IN ('20E', '20F', '40E', '40F', '45E', '45F')
             AND v.vesselTypeCode = 'Container Yard'
@@ -1908,13 +2170,17 @@ async def get_container_gate_volumes(
             # 45ft containers (45E, 45F) = quantity * 2.25
             if cargo_code in ['20E', '20F']:
                 teu_multiplier = 1.0
+                container_size_id = 73
             elif cargo_code in ['40E', '40F']:
                 teu_multiplier = 2.0
+                container_size_id = 241
             elif cargo_code in ['45E', '45F']:
                 teu_multiplier = 2.25
+                container_size_id = 321
             else:
                 # Default to 1 for unknown cargo codes
                 teu_multiplier = 1.0
+                container_size_id = None
             
             container_teu = int(quantity * teu_multiplier)
             
@@ -1926,11 +2192,12 @@ async def get_container_gate_volumes(
                 containerTEU=container_teu,
                 handlingMethodId=row.get('jobMethodCode', '') or '',
                 finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
-                containerOperatorId=row.get('consigneeFullName', '') or ''
+                containerOperatorId=row.get('consigneeFullName', '') or '',
+                containerSizeId=container_size_id
             )
             volumes.append(volume_item)
         
-        logger.info(f"Returned {len(volumes)} container gate volume records (page {page}, limit {limit})")
+        logger.info(f"Returned {len(volumes)} container gate volume records")
         
         return ContainerGateVolumeListResponse(
             code="1",
