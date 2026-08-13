@@ -486,10 +486,8 @@ async def get_cargo_categories(
                 updateTime,
                 cargoGroupCode,
                 cargoGroupName,
-                cargoGroupDescription,
                 cargoGroupBillingCode,
-                cargoGroupBillingName,
-                cargoGroupBillingDescription
+                cargoGroupBillingName
             FROM dbo.vwCargo
             WHERE 1=1
             AND ISNULL(rowInvisible, 0) = 0
@@ -585,10 +583,8 @@ async def get_cargo_by_id(
                 updateTime,
                 cargoGroupCode,
                 cargoGroupName,
-                cargoGroupDescription,
                 cargoGroupBillingCode,
-                cargoGroupBillingName,
-                cargoGroupBillingDescription
+                cargoGroupBillingName
             FROM dbo.vwCargo
             WHERE cargoId = ?
             AND rowDeleted = 0
