@@ -441,7 +441,7 @@ async def get_customer_by_id(
 # Cargo Category API Endpoints
 
 @app.get(
-    "/api/cargoType",
+    "/api/cargoCategory",
     response_model=CargoListResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
@@ -541,7 +541,7 @@ async def get_cargo_categories(
 
 
 @app.get(
-    "/api/cargoType/{cargo_id}",
+    "/api/cargoCategory/{cargo_id}",
     response_model=CargoSingleResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
@@ -637,7 +637,7 @@ async def get_cargo_by_id(
 # Cargo Type API Endpoints
 
 @app.get(
-    "/api/cargoCategory",
+    "/api/cargoType",
     response_model=CargoTypeListResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
@@ -715,7 +715,7 @@ async def get_cargo_types(
 
 
 @app.get(
-    "/api/cargoCategory/{cargo_type_id}",
+    "/api/cargoType/{cargo_type_id}",
     response_model=CargoTypeSingleResponse,
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
