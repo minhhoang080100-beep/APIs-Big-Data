@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Offline regression suite: python -m pytest tests/test_vietsun_scope.py -q
+# Do not collect the legacy root test_*.py scripts; they access live services.
+pytest
+httpx
+

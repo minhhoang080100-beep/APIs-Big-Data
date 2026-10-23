@@ -44,6 +44,8 @@ from schemas import (
     ContainerSizeData
 )
 from database import db
+from date_filters import production_date_range, production_finish_date
+from production_scope import EXCLUDE_VIETSUN_SQL
 from auth import (
     authenticate_user, 
     create_access_token, 
@@ -1611,8 +1613,8 @@ async def get_container_sizes(
     tags=["Bulk Gate Volumes"]
 )
 async def get_bulk_gate_volumes(
-    startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record bắt đầu từ finishDate"),
-    endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record có ngày kết thúc là finishDate"),
+    startDate: Optional[str] = Query(None, description="Từ ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
+    endDate: Optional[str] = Query(None, description="Đến hết ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
     limit: Optional[int] = Query(20, description="Số lượng record mỗi trang (max 100)", ge=1, le=100),
@@ -1631,6 +1633,7 @@ async def get_bulk_gate_volumes(
     **Yêu cầu**: Bearer token từ /api/login
     """
     logger.info(f"Bulk gate volumes request by {current_user.username}")
+    start_day, end_exclusive = production_date_range(startDate, endDate)
     
     try:
         # Base query for bulk gate volumes from vwTallyShiftAll
@@ -1664,13 +1667,13 @@ async def get_bulk_gate_volumes(
         params = []
         
         # Add optional filters
-        if startDate:
+        if start_day is not None:
             query += " AND t.shiftDate >= ?"
-            params.append(startDate)
+            params.append(start_day)
         
-        if endDate:
-            query += " AND t.shiftDate <= ?"
-            params.append(endDate)
+        if end_exclusive is not None:
+            query += " AND t.shiftDate < ?"
+            params.append(end_exclusive)
         
         # companyId is hardcoded as 'CNT' - removed from query filters
         
@@ -1693,7 +1696,7 @@ async def get_bulk_gate_volumes(
         for row in results:
             volume_item = BulkGateVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
-                finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
+                finishDate=production_finish_date(row.get('shiftDate')),
                 companyId="CNT",
                 cargoTypeId=str(row.get('cargoGroupId', '')) if row.get('cargoGroupId') else '',
                 cargoCategoryId=str(row.get('cargoId', '')) if row.get('cargoId') else '',
@@ -1737,8 +1740,8 @@ async def get_bulk_gate_volumes(
     tags=["Bulk Quay Volumes"]
 )
 async def get_bulk_quay_volumes(
-    startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record bắt đầu từ finishDate"),
-    endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record có ngày kết thúc là finishDate"),
+    startDate: Optional[str] = Query(None, description="Từ ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
+    endDate: Optional[str] = Query(None, description="Đến hết ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
     shipId: Optional[str] = Query(None, description="Lọc các bản ghi theo tàu chở hàng rời"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
@@ -1754,11 +1757,14 @@ async def get_bulk_quay_volumes(
     - vesselTypeCode NOT IN ('Warehouse', 'Bulk Yard', 'Container Yard')
     - weightNetSum > 0
     - rowDeleted IS NULL (active records only)
+    - Exclude confirmed VietSun voyages: first actual berth 13 in SmartTOS
+    - Missing/ambiguous initial berth is retained; this is not a strict Nghe Tinh scope
     - Optional: startDate, endDate, companyId, shipId, handlingMethodId
     
     **Yêu cầu**: Bearer token từ /api/login
     """
     logger.info(f"Bulk quay volumes request by {current_user.username}")
+    start_day, end_exclusive = production_date_range(startDate, endDate)
     
     try:
         # Base query for bulk quay volumes from vwTallyShiftAll
@@ -1793,17 +1799,18 @@ async def get_bulk_quay_volumes(
             AND (v.vesselTypeCode IS NULL OR v.vesselTypeCode NOT IN ('Warehouse', 'Bulk Yard', 'Container Yard'))
             AND (',' + REPLACE(ISNULL(jm.statisticsGroupTypeIdList, ''), ' ', '') + ',') LIKE '%,2,%'
         """
+        query += EXCLUDE_VIETSUN_SQL
         
         params = []
         
         # Add optional filters
-        if startDate:
+        if start_day is not None:
             query += " AND t.shiftDate >= ?"
-            params.append(startDate)
+            params.append(start_day)
         
-        if endDate:
-            query += " AND t.shiftDate <= ?"
-            params.append(endDate)
+        if end_exclusive is not None:
+            query += " AND t.shiftDate < ?"
+            params.append(end_exclusive)
         
         # companyId is hardcoded as 'CNT' - removed from query filters
         
@@ -1830,7 +1837,7 @@ async def get_bulk_quay_volumes(
         for row in results:
             volume_item = BulkQuayVolumeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
-                finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
+                finishDate=production_finish_date(row.get('shiftDate')),
                 companyId="CNT",
                 shipId=str(row.get('vesselId', '')) if row.get('vesselId') else '',
                 shipAgentId=str(row.get('agencyId', '')) if row.get('agencyId') else '',
@@ -1876,8 +1883,8 @@ async def get_bulk_quay_volumes(
     tags=["Container Quay Volumes"]
 )
 async def get_container_quay_volumes(
-    startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record bắt đầu từ finishDate"),
-    endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, sử dụng để lấy những record có ngày kết thúc là finishDate"),
+    startDate: Optional[str] = Query(None, description="Từ ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
+    endDate: Optional[str] = Query(None, description="Đến hết ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
     shipId: Optional[str] = Query(None, description="Lọc các bản ghi theo tàu chở hàng"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
@@ -1894,11 +1901,14 @@ async def get_container_quay_volumes(
     - cargoCode in 20E, 20F, 40E, 40F, 45E, 45F
     - vesselTypeCode <> 'Container Yard'
     - rowDeleted IS NULL (active records only)
+    - Exclude confirmed VietSun voyages: first actual berth 13 in SmartTOS
+    - Missing/ambiguous initial berth is retained; this is not a strict Nghe Tinh scope
     - Optional: startDate, endDate, companyId, shipId, handlingMethodId
     
     **Yêu cầu**: Bearer token từ /api/login
     """
     logger.info(f"Container quay volumes request by {current_user.username}")
+    start_day, end_exclusive = production_date_range(startDate, endDate)
     
     try:
         # Base query for container quay volumes from vwTallyShiftAll
@@ -1943,17 +1953,18 @@ async def get_container_quay_volumes(
             AND (v.vesselTypeCode IS NULL OR v.vesselTypeCode <> 'Container Yard')
             AND (',' + REPLACE(ISNULL(jm.statisticsGroupTypeIdList, ''), ' ', '') + ',') LIKE '%,2,%'
         """
+        query += EXCLUDE_VIETSUN_SQL
         
         params = []
         
         # Add optional filters
-        if startDate:
+        if start_day is not None:
             query += " AND t.shiftDate >= ?"
-            params.append(startDate)
+            params.append(start_day)
         
-        if endDate:
-            query += " AND t.shiftDate <= ?"
-            params.append(endDate)
+        if end_exclusive is not None:
+            query += " AND t.shiftDate < ?"
+            params.append(end_exclusive)
         
         # companyId is hardcoded as 'CNT' - removed from query filters
         
@@ -2028,7 +2039,7 @@ async def get_container_quay_volumes(
                 containerWeight=float(container_weight),
                 containerTEU=container_teu,
                 handlingMethodId=row.get('jobMethodCode', '') or '',
-                finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
+                finishDate=production_finish_date(row.get('shiftDate')),
                 shipOperatorId='',
                 containerOperatorId=row.get('consigneeFullName', '') or '',
                 containerSizeId=container_size_id,
@@ -2069,8 +2080,8 @@ async def get_container_quay_volumes(
     tags=["Container Gate Volumes"]
 )
 async def get_container_gate_volumes(
-    startDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, từ ngày"),
-    endDate: Optional[str] = Query(None, description="Lọc record với trường finishDate, đến ngày"),
+    startDate: Optional[str] = Query(None, description="Từ ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
+    endDate: Optional[str] = Query(None, description="Đến hết ngày finishDate, định dạng YYYYMMDD hoặc YYYY-MM-DD"),
     handlingMethodId: Optional[str] = Query(None, description="Lọc các bản ghi theo phương án xếp dỡ"),
     page: Optional[int] = Query(1, description="Page number cho phần trang (pagination)", ge=1),
     limit: Optional[int] = Query(20, description="Số lượng record mỗi trang (max 100)", ge=1, le=100),
@@ -2090,6 +2101,7 @@ async def get_container_gate_volumes(
     **Yêu cầu**: Bearer token từ /api/login
     """
     logger.info(f"Container gate volumes request by {current_user.username}")
+    start_day, end_exclusive = production_date_range(startDate, endDate)
     
     try:
         # Base query for container gate volumes from vwTallyShiftAll
@@ -2129,13 +2141,13 @@ async def get_container_gate_volumes(
         params = []
         
         # Add optional filters
-        if startDate:
+        if start_day is not None:
             query += " AND t.shiftDate >= ?"
-            params.append(startDate)
+            params.append(start_day)
         
-        if endDate:
-            query += " AND t.shiftDate <= ?"
-            params.append(endDate)
+        if end_exclusive is not None:
+            query += " AND t.shiftDate < ?"
+            params.append(end_exclusive)
         
         # companyId is hardcoded as 'CNT' - removed from query filters
         
@@ -2187,7 +2199,7 @@ async def get_container_gate_volumes(
                 containerWeight=float(row.get('weightNetSum', 0)) if row.get('weightNetSum') else 0.0,
                 containerTEU=container_teu,
                 handlingMethodId=row.get('jobMethodCode', '') or '',
-                finishDate=row.get('shiftDate').strftime("%Y-%m-%d") if row.get('shiftDate') and hasattr(row.get('shiftDate'), 'strftime') else str(row.get('shiftDate')) if row.get('shiftDate') else '',
+                finishDate=production_finish_date(row.get('shiftDate')),
                 containerOperatorId=row.get('consigneeFullName', '') or '',
                 containerSizeId=container_size_id
             )
