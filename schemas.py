@@ -134,7 +134,7 @@ class HandlingMethodData(BaseModel):
     """Handling method data model"""
     reportDate: str = Field(..., description="Ngày lấy dữ liệu")
     handlingMethodId: str = Field(..., description="Mã phương án tác nghiệp")
-    handlingMethodName: str = Field("", description="Tên phương án tác nghiệp: Nhập hàng từ tàu lên kho bãi, Xuất hàng từ kho bãi xuống tàu...")
+    handlingMethodName: str = Field("", description="Tên nguồn; các tên khác nhau cùng mã được gộp, phân cách bằng ' / '")
     createdDate: Optional[str] = Field(None, description="Ngày tạo bản ghi")
     modifiedDate: Optional[str] = Field(None, description="Ngày sửa bản ghi")
 
@@ -351,11 +351,12 @@ class ContainerSizeData(BaseModel):
     """Schema for Container Size data"""
     reportDate: str = Field(..., description="Ngày lấy dữ liệu")
     containerSizeId: int = Field(..., description="Id kích cỡ container")
-    localSzTp: str = Field(..., description="Local size type")
+    localSzTp: str = Field(..., description="Mã nội bộ duy nhất; rỗng nếu thiếu hoặc có nhiều alias")
+    localSzTpAliases: List[str] = Field(default_factory=list, description="Toàn bộ mã nội bộ đang hoạt động của cùng ID ISO")
     isoSzTp: str = Field(..., description="ISO size type")
-    sizeCode: str = Field(..., description="Mã size container")
-    heightCode: str = Field(..., description="Mã chiều cao container")
-    containerTypeCode: str = Field(..., description="Mã loại container")
+    sizeCode: str = Field(..., description="Chiều dài theo feet; rỗng nếu chưa xác định")
+    heightCode: str = Field(..., description="Chiều cao feet/inch: 86 = 8ft6in, 96 = 9ft6in; rỗng nếu chưa xác định")
+    containerTypeCode: str = Field(..., description="Hai ký tự loại container trong mã ISO, ví dụ G0, R1")
     createdAt: Optional[str] = Field(None, description="Ngày tạo bản ghi")
     updatedAt: Optional[str] = Field(None, description="Ngày sửa bản ghi")
 

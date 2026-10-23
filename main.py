@@ -46,6 +46,10 @@ from schemas import (
 from database import db
 from date_filters import production_date_range, production_finish_date
 from production_scope import EXCLUDE_VIETSUN_SQL
+from catalog_mapping import (
+    handling_methods_query, canonical_handling_methods,
+    container_sizes_query, canonical_container_sizes,
+)
 from auth import (
     authenticate_user, 
     create_access_token, 
@@ -212,8 +216,8 @@ async def protected_route(current_user = Depends(get_current_user)):
     tags=["Customers"]
 )
 async def get_customers(
-    startDate: Optional[str] = Query(None, description="Lọc theo ngày tạo (from)"),
-    endDate: Optional[str] = Query(None, description="Lọc theo ngày tạo (to)"),
+    startDate: Optional[str] = Query(None, description="Lọc theo ngày cập nhật từ ngày này (YYYYMMDD hoặc YYYY-MM-DD)"),
+    endDate: Optional[str] = Query(None, description="Lọc theo ngày cập nhật đến hết ngày này (YYYYMMDD hoặc YYYY-MM-DD)"),
     customerTaxCode: Optional[str] = Query(None, description="Lọc theo mã số thuế"),
     companyId: Optional[str] = Query(None, description="Mã công ty"),
     customerType: Optional[str] = Query(None, description="Loại khách hàng"),
@@ -222,8 +226,8 @@ async def get_customers(
     """
     Lấy danh sách khách hàng với các bộ lọc tùy chọn
     
-    - **startDate**: Lọc theo ngày tạo (YYYY-MM-DD)
-    - **endDate**: Lọc theo ngày tạo (YYYY-MM-DD)
+    - **startDate**: Lọc theo ngày cập nhật updateTime, từ ngày này (YYYYMMDD hoặc YYYY-MM-DD)
+    - **endDate**: Lọc theo ngày cập nhật updateTime, đến hết ngày này (YYYYMMDD hoặc YYYY-MM-DD)
     - **customerTaxCode**: Mã số thuế
     - **companyId**: Mã công ty
     - **customerType**: Loại khách hàng
@@ -233,6 +237,7 @@ async def get_customers(
     logger.info(f"Customer list request by {current_user.username}")
     
     try:
+        start_day, end_exclusive = production_date_range(startDate, endDate)
         # Build SQL query with correct column names from actual schema
         query = """
             SELECT 
@@ -273,13 +278,13 @@ async def get_customers(
         params = []
         
         # Apply filters
-        if startDate:
-            query += " AND CAST(updateTime AS DATE) >= ?"
-            params.append(startDate)
+        if start_day is not None:
+            query += " AND updateTime >= ?"
+            params.append(start_day)
         
-        if endDate:
-            query += " AND CAST(updateTime AS DATE) <= ?"
-            params.append(endDate)
+        if end_exclusive is not None:
+            query += " AND updateTime < ?"
+            params.append(end_exclusive)
         
         if customerTaxCode:
             query += " AND partnerTaxCode = ?"
@@ -324,13 +329,15 @@ async def get_customers(
             data=customers
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching customers: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -435,7 +442,7 @@ async def get_customer_by_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -498,7 +505,7 @@ async def get_cargo_categories(
         params = []
         
         # Apply filters
-        if cargoTypeId:
+        if cargoTypeId is not None:
             query += " AND cargoGroupId = ?"
             params.append(cargoTypeId)
         
@@ -537,7 +544,7 @@ async def get_cargo_categories(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -631,7 +638,7 @@ async def get_cargo_by_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -711,7 +718,7 @@ async def get_cargo_types(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -747,33 +754,31 @@ async def get_cargo_type_by_id(
         try:
             type_id_int = int(cargo_type_id)
             query = """
-                SELECT DISTINCT
+                SELECT
                     cargoGroupId,
                     cargoGroupCode,
                     cargoGroupName,
-                    MIN(createTime) as createTime,
-                    MAX(updateTime) as updateTime
-                FROM dbo.vwCargo
+                    createTime,
+                    updateTime
+                FROM dbo.CargoGroup
                 WHERE cargoGroupId = ?
                 AND ISNULL(rowDeleted, 0) = 0
                 AND ISNULL(rowInvisible, 0) = 0
-                GROUP BY cargoGroupId, cargoGroupCode, cargoGroupName
             """
             results = db.execute_query(query, (type_id_int,))
         except ValueError:
             # If not an int, search by code
             query = """
-                SELECT DISTINCT
+                SELECT
                     cargoGroupId,
                     cargoGroupCode,
                     cargoGroupName,
-                    MIN(createTime) as createTime,
-                    MAX(updateTime) as updateTime
-                FROM dbo.vwCargo
+                    createTime,
+                    updateTime
+                FROM dbo.CargoGroup
                 WHERE cargoGroupCode = ?
                 AND ISNULL(rowDeleted, 0) = 0
                 AND ISNULL(rowInvisible, 0) = 0
-                GROUP BY cargoGroupId, cargoGroupCode, cargoGroupName
             """
             results = db.execute_query(query, (cargo_type_id,))
         
@@ -811,7 +816,7 @@ async def get_cargo_type_by_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -834,10 +839,8 @@ async def get_handling_methods(
     current_user = Depends(get_current_user)
 ):
     """
-    Lấy danh sách các phương án tác nghiệp với phân trang
-    
-    - **page**: Trang hiện tại (default: 1)
-    - **limit**: Số records mỗi trang (default: 20, max: 100)
+    Lấy danh sách phương án, mỗi mã nguồn xuất hiện đúng một lần.
+    Các tên khác nhau cùng mã được giữ lại, phân cách bằng " / ".
     - **companyId**: Mã công ty (optional)
     
     **Yêu cầu**: Bearer token từ /api/login
@@ -845,27 +848,8 @@ async def get_handling_methods(
     logger.info(f"Handling method list request by {current_user.username}")
     
     try:
-        # Query to get distinct handling methods from vwJobMethodAll
-        # Use jobMethodCode and jobMethodName for handling method information
-        query = """
-            SELECT DISTINCT
-                jobMethodCode,
-                jobMethodName,
-                MIN(createTime) as createTime,
-                MAX(updateTime) as updateTime
-            FROM dbo.vwJobMethodAll
-            WHERE ISNULL(rowDeleted, 0) = 0
-            AND ISNULL(rowInvisible, 0) = 0
-            AND jobMethodCode IS NOT NULL
-            AND jobMethodName IS NOT NULL
-            GROUP BY jobMethodCode, jobMethodName
-        """
-        
-        params = []
-        query += " ORDER BY jobMethodCode"
-        
-        # Execute query
-        results = db.execute_query(query, tuple(params) if params else None)
+        query, params = handling_methods_query()
+        results = canonical_handling_methods(db.execute_query(query, params))
         
         # Transform to HandlingMethodData format
         handling_methods = []
@@ -893,7 +877,7 @@ async def get_handling_methods(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -904,6 +888,7 @@ async def get_handling_methods(
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
         404: {"description": "Không tìm thấy phương án tác nghiệp"},
+        409: {"description": "Mã tra cứu khớp nhiều định danh nguồn"},
         401: {"description": "Chưa xác thực"}
     },
     summary="Lấy thông tin phương án tác nghiệp theo ID",
@@ -925,20 +910,8 @@ async def get_handling_method_by_id(
     logger.info(f"Handling method detail request for ID {handling_method_id} by {current_user.username}")
     
     try:
-        query = """
-            SELECT DISTINCT
-                jobMethodCode,
-                jobMethodName,
-                MIN(createTime) as createTime,
-                MAX(updateTime) as updateTime
-            FROM dbo.vwJobMethodAll
-            WHERE ISNULL(rowDeleted, 0) = 0
-            AND ISNULL(rowInvisible, 0) = 0
-            AND jobMethodCode = ?
-            GROUP BY jobMethodCode, jobMethodName
-        """
-        
-        results = db.execute_query(query, (handling_method_id,))
+        query, params = handling_methods_query(handling_method_id)
+        results = canonical_handling_methods(db.execute_query(query, params))
         
         if not results:
             raise HTTPException(
@@ -949,6 +922,10 @@ async def get_handling_method_by_id(
                 }
             )
         
+        if len(results) > 1:
+            raise HTTPException(status_code=409, detail={
+                "code": "0", "message": "Mã phương án khớp nhiều định danh nguồn"
+            })
         row = results[0]
         method = HandlingMethodData(
             reportDate=datetime.now().strftime("%Y-%m-%d"),
@@ -974,7 +951,7 @@ async def get_handling_method_by_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -1053,7 +1030,7 @@ async def get_classes(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -1134,7 +1111,7 @@ async def get_class_by_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -1235,7 +1212,7 @@ async def get_ships(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 
@@ -1246,6 +1223,7 @@ async def get_ships(
     responses={
         200: {"description": "Lấy dữ liệu thành công"},
         404: {"description": "Không tìm thấy tàu"},
+        409: {"description": "Mã IMO tương ứng nhiều bản ghi tàu; cần đối chiếu danh mục nguồn"},
         401: {"description": "Chưa xác thực"}
     },
     summary="Lấy thông tin tàu theo IMO",
@@ -1259,8 +1237,10 @@ async def get_ship_by_imo(
     """
     Lấy thông tin chi tiết của một tàu
     
-    - **ship_imo**: Mã IMO của tàu (vesselCode)
+    - **ship_imo**: Mã IMO của tàu (numberIMO)
     - **companyId**: Mã công ty (optional)
+
+    Trả về 409 nếu mã IMO trùng nhiều bản ghi, không tự chọn một tàu bất kỳ.
     
     **Yêu cầu**: Bearer token từ /api/login
     """
@@ -1302,6 +1282,15 @@ async def get_ship_by_imo(
                     "message": "Không tìm thấy tàu"
                 }
             )
+
+        if len(results) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "0",
+                    "message": "Mã IMO tương ứng nhiều bản ghi tàu; cần đối chiếu danh mục nguồn"
+                }
+            )
         
         row = results[0]
         ship_item = ShipData(
@@ -1337,7 +1326,7 @@ async def get_ship_by_imo(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi lấy dữ liệu: {str(e)}"
+                "message": "Lỗi lấy dữ liệu"
             }
         )
 # ============================================================
@@ -1395,7 +1384,7 @@ async def get_origins(
             params.append(f"%{origin}%")
             
         offset = (page - 1) * limit
-        query += " ORDER BY cargoOriginCode"
+        query += " ORDER BY cargoOriginCode, cargoOriginId"
         query += " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
         params.extend([offset, limit])
         
@@ -1421,7 +1410,7 @@ async def get_origins(
         
     except Exception as e:
         logger.error(f"Error fetching origins: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Lỗi lấy dữ liệu")
 
 @app.get(
     "/api/origins/{originId}",
@@ -1462,11 +1451,13 @@ async def get_origin_by_id(
         rows = db.execute_query(query, [originId])
         
         if not rows:
-            return {
-                "code": "0",
-                "message": "Không tìm thấy dữ liệu",
-                "data": None
-            }
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "0",
+                    "message": "Không tìm thấy dữ liệu"
+                }
+            )
             
         row = rows[0]
         data = {
@@ -1483,9 +1474,11 @@ async def get_origin_by_id(
             "data": data
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching origin by id: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Lỗi lấy dữ liệu")
 
 # ============================================================
 
@@ -1506,57 +1499,23 @@ async def get_container_sizes(
     current_user = Depends(get_current_user)
 ):
     """
-    API cung cấp thông tin kích thước container
+    API cung cấp thông tin kích thước container.
+
+    Mỗi ID ISO xuất hiện một lần. localSzTp chỉ có giá trị khi có đúng một
+    mã nội bộ; localSzTpAliases giữ toàn bộ mã nội bộ đang hoạt động.
+    sizeCode là chiều dài theo feet; heightCode dùng feet/inch (86, 96).
+    containerTypeCode lấy từ hai ký tự cuối ISO, không lấy từ mã nội bộ.
     
     **Yêu cầu**: Bearer token từ /api/login
     """
     logger.info(f"Container sizes request by {current_user.username}")
     
     try:
-        query = """
-            SELECT
-                containerSizeTypeId,
-                containerSizeTypeDomesticCode,
-                containerSizeTypeCode,
-                containerLengthFt,
-                containerHeightFt,
-                createTime,
-                updateTime
-            FROM dbo.vwContainerSizeTypeDomestic
-            WHERE ISNULL(rowDeleted, 0) = 0
-            AND ISNULL(rowInvisible, 0) = 0
-        """
-        params = []
-        
-        if containerSizeId:
-            query += " AND CAST(containerSizeTypeId AS VARCHAR) = ?"
-            params.append(containerSizeId)
-            
-        query += " ORDER BY containerSizeTypeId"
-        
-        results = db.execute_query(query, tuple(params))
+        query, params = container_sizes_query(containerSizeId)
+        results = canonical_container_sizes(db.execute_query(query, params))
         
         items = []
         for row in results:
-            domestic_code = row.get('containerSizeTypeDomesticCode') or ''
-            type_code = domestic_code[-2:] if len(domestic_code) >= 2 else ''
-            
-            length = row.get('containerLengthFt')
-            size_code = domestic_code[:2] if len(domestic_code) >= 2 else (str(int(length)) if length is not None else '')
-            
-            height = row.get('containerHeightFt')
-            height_code = str(int(height * 10)) if height is not None else ''
-            
-            iso_code = row.get('containerSizeTypeCode') or ''
-            if not height_code and len(iso_code) >= 2:
-                height_char = iso_code[1]
-                if height_char == '2':
-                    height_code = '86'
-                elif height_char == '5':
-                    height_code = '95'
-                elif height_char == '0':
-                    height_code = '80'
-            
             created_date = row.get('createTime')
             if created_date and hasattr(created_date, 'strftime'):
                 created_date_str = created_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
@@ -1572,11 +1531,12 @@ async def get_container_sizes(
             item = ContainerSizeData(
                 reportDate=datetime.now().strftime("%Y-%m-%d"),
                 containerSizeId=int(row.get('containerSizeTypeId', 0)),
-                localSzTp=domestic_code,
+                localSzTp=row['localSzTp'],
+                localSzTpAliases=row['localSzTpAliases'],
                 isoSzTp=row.get('containerSizeTypeCode') or '',
-                sizeCode=size_code,
-                heightCode=height_code,
-                containerTypeCode=type_code,
+                sizeCode=row['sizeCode'],
+                heightCode=row['heightCode'],
+                containerTypeCode=row['containerTypeCode'],
                 createdAt=created_date_str,
                 updatedAt=modified_date_str
             )
@@ -1594,7 +1554,7 @@ async def get_container_sizes(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "0",
-                "message": f"Lỗi hệ thống: {str(e)}"
+                "message": "Lỗi hệ thống"
             }
         )
 
